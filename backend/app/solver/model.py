@@ -37,6 +37,10 @@ class RoutingProblem:
     vehicles: int
     capacity: float
     stop_ids: list[int] = field(default_factory=list)  # node index -> client stop id (index 0 unused)
+    # Per-node candidate lists: the k nearest OTHER stops (depot excluded), by
+    # distance. Used to bias inter-route move proposals toward geographically
+    # plausible targets; empty tuple = fall back to uniform proposals.
+    neighbors: tuple[tuple[int, ...], ...] = ()
 
     def node_of_stop_id(self, stop_id: int) -> int:
         return self.stop_ids.index(stop_id)
@@ -69,8 +73,15 @@ def build_routing_problem(
             # A half-open window is closed with a permissive bound.
             tw.append((s.tw_start or 0.0, s.tw_end if s.tw_end is not None else float("inf")))
 
+    n = len(problem.stops)
+    k = min(10, n - 1)
+    neighbors: list[tuple[int, ...]] = [()]  # depot has no candidate list
+    for i in range(1, n + 1):
+        ranked = sorted((j for j in range(1, n + 1) if j != i), key=lambda j: dist[i][j])
+        neighbors.append(tuple(ranked[:k]))
+
     return RoutingProblem(
-        n=len(problem.stops),
+        n=n,
         dist_km=dist,
         time_min=time,
         demand=[0.0] + [s.demand for s in problem.stops],
@@ -79,6 +90,7 @@ def build_routing_problem(
         vehicles=problem.fleet.count,
         capacity=problem.fleet.capacity,
         stop_ids=[0] + [s.id for s in problem.stops],
+        neighbors=tuple(neighbors),
     )
 
 

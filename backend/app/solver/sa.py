@@ -181,7 +181,7 @@ def anneal(
         progress = min(1.0, max(iteration / params.iterations, elapsed_frac))
         temperature = t0 * math.exp(log_ratio * progress)
 
-        move = propose_random_move(current, rng)
+        move = propose_random_move(current, rng, p)
         if move is not None:
             # Unrolled cost arithmetic: moves touch one or two routes, and this
             # runs ~10^6 times per solve — generator+sum overhead is measurable.

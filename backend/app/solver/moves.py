@@ -23,7 +23,14 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-from .model import Route, Solution
+from .model import Route, RoutingProblem, Solution
+
+# Probability that an inter-route move targets a k-nearest-neighbor candidate
+# instead of a uniformly random position. Biasing toward geographically close
+# targets raises the useful-proposal rate enormously at low temperature; the
+# 1 - P_NEIGHBOR uniform share keeps long-range moves possible, so the search
+# space stays connected and exploration never dies entirely.
+P_NEIGHBOR = 0.8
 
 
 @dataclass(frozen=True)
@@ -77,7 +84,19 @@ def or_opt_relocate(route: Route, start: int, length: int, insert_at: int) -> Ro
 # ---------------------------------------------------------------------------
 
 
-def propose_two_opt(solution: Solution, rng: random.Random) -> Move | None:
+def _locate(solution: Solution, node: int, exclude: int) -> tuple[int, int] | None:
+    """Find (route index, position) of ``node``, skipping route ``exclude``."""
+    for k, route in enumerate(solution):
+        if k == exclude:
+            continue
+        try:
+            return k, route.index(node)
+        except ValueError:
+            continue
+    return None
+
+
+def propose_two_opt(solution: Solution, rng: random.Random, p: RoutingProblem) -> Move | None:
     candidates = [k for k, r in enumerate(solution) if len(r) >= 2]
     if not candidates:
         return None
@@ -88,7 +107,7 @@ def propose_two_opt(solution: Solution, rng: random.Random) -> Move | None:
     return Move("two_opt", (k,), (two_opt_reverse(route, i, j),))
 
 
-def propose_or_opt(solution: Solution, rng: random.Random) -> Move | None:
+def propose_or_opt(solution: Solution, rng: random.Random, p: RoutingProblem) -> Move | None:
     candidates = [k for k, r in enumerate(solution) if len(r) >= 3]
     if not candidates:
         return None
@@ -104,12 +123,13 @@ def propose_or_opt(solution: Solution, rng: random.Random) -> Move | None:
     return Move("or_opt", (k,), (new_route,))
 
 
-def propose_relocate(solution: Solution, rng: random.Random) -> Move | None:
+def propose_relocate(solution: Solution, rng: random.Random, p: RoutingProblem) -> Move | None:
     """Move a chain of 1-3 consecutive stops to another route (possibly empty).
 
-    Single-stop relocation is the classic move; letting the chain grow to 2-3
-    (biased toward 1) also transfers naturally-adjacent stops together, which is
-    what actually rebalances clustered instances.
+    With probability P_NEIGHBOR the insertion point is chosen next to one of the
+    chain head's k nearest stops (candidate-list biasing); otherwise — and
+    whenever the neighbor happens to sit in the same source route — the
+    destination is uniform, which keeps empty routes reachable too.
     """
     if len(solution) < 2:
         return None
@@ -117,26 +137,58 @@ def propose_relocate(solution: Solution, rng: random.Random) -> Move | None:
     if not sources:
         return None
     src = rng.choice(sources)
-    dst = rng.choice([k for k in range(len(solution)) if k != src])
     src_route = solution[src]
     max_len = min(3, len(src_route))
     length = 1 if max_len == 1 else rng.choice((1, 1, 2, min(3, max_len)))
     start = rng.randrange(0, len(src_route) - length + 1)
     chain = src_route[start : start + length]
     new_src = src_route[:start] + src_route[start + length :]
+
+    if p.neighbors and rng.random() < P_NEIGHBOR:
+        nbrs = p.neighbors[chain[0]]
+        anchor = nbrs[rng.randrange(len(nbrs))]
+        loc = _locate(solution, anchor, exclude=src)
+        if loc is not None:
+            dst, pos = loc
+            insert_at = pos + rng.randint(0, 1)  # just before or just after the anchor
+            dst_route = solution[dst]
+            new_dst = dst_route[:insert_at] + chain + dst_route[insert_at:]
+            return Move("relocate", (src, dst), (new_src, new_dst))
+
+    dst = rng.choice([k for k in range(len(solution)) if k != src])
     dst_route = solution[dst]
     insert_at = rng.randrange(0, len(dst_route) + 1)
     new_dst = dst_route[:insert_at] + chain + dst_route[insert_at:]
     return Move("relocate", (src, dst), (new_src, new_dst))
 
 
-def propose_swap(solution: Solution, rng: random.Random) -> Move | None:
+def propose_swap(solution: Solution, rng: random.Random, p: RoutingProblem) -> Move | None:
+    """Exchange one stop between two routes, biased toward swapping with one of
+    the picked stop's k nearest neighbors (same rationale as relocate)."""
     non_empty = [k for k, r in enumerate(solution) if r]
     if len(non_empty) < 2:
         return None
-    a, b = rng.sample(non_empty, 2)
-    ra, rb = solution[a], solution[b]
-    ia, ib = rng.randrange(len(ra)), rng.randrange(len(rb))
+    a = rng.choice(non_empty)
+    ra = solution[a]
+    ia = rng.randrange(len(ra))
+
+    if p.neighbors and rng.random() < P_NEIGHBOR:
+        nbrs = p.neighbors[ra[ia]]
+        anchor = nbrs[rng.randrange(len(nbrs))]
+        loc = _locate(solution, anchor, exclude=a)
+        if loc is not None:
+            b, ib = loc
+            rb = solution[b]
+            new_a = ra[:ia] + [rb[ib]] + ra[ia + 1 :]
+            new_b = rb[:ib] + [ra[ia]] + rb[ib + 1 :]
+            return Move("swap", (a, b), (new_a, new_b))
+
+    others = [k for k in non_empty if k != a]
+    if not others:
+        return None
+    b = rng.choice(others)
+    rb = solution[b]
+    ib = rng.randrange(len(rb))
     new_a = ra[:ia] + [rb[ib]] + ra[ia + 1 :]
     new_b = rb[:ib] + [ra[ia]] + rb[ib + 1 :]
     return Move("swap", (a, b), (new_a, new_b))
@@ -162,13 +214,13 @@ _MENU_CUM = tuple(
 )
 
 
-def propose_random_move(solution: Solution, rng: random.Random) -> Move | None:
-    """Sample a move kind by weight, then a uniformly random instance of that kind.
+def propose_random_move(
+    solution: Solution, rng: random.Random, p: RoutingProblem
+) -> Move | None:
+    """Sample a move kind by weight, then a random instance of that kind.
 
     Falls back through the menu if the sampled kind is inapplicable (e.g. swap
     with a single non-empty route), returning None only when nothing applies.
-    (The dispatch consumes exactly one rng.random() and tries kinds in the same
-    order as the original scan, so fixed-seed runs are bit-for-bit unchanged.)
     """
     r = rng.random() * _MENU_TOTAL
     first = 0
@@ -176,13 +228,13 @@ def propose_random_move(solution: Solution, rng: random.Random) -> Move | None:
         if r <= threshold:
             first = i
             break
-    move = _MENU_FNS[first](solution, rng)
+    move = _MENU_FNS[first](solution, rng, p)
     if move is not None:
         return move
     for i, fn in enumerate(_MENU_FNS):
         if i == first:
             continue
-        move = fn(solution, rng)
+        move = fn(solution, rng, p)
         if move is not None:
             return move
     return None

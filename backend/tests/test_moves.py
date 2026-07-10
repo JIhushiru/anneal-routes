@@ -121,7 +121,7 @@ def test_propose_random_move_preserves_multiset_of_stops():
     solution = [[1, 2, 3], [4, 5, 6], [7, 8]]
     all_stops = sorted(n for r in solution for n in r)
     for _ in range(500):
-        move = propose_random_move(solution, rng)
+        move = propose_random_move(solution, rng, p)
         assert move is not None
         move.apply(solution)
         assert sorted(n for r in solution for n in r) == all_stops
@@ -134,5 +134,24 @@ def test_propose_random_move_handles_degenerate_solutions():
     # Single stop, single route: only relocate to itself is impossible; the
     # sampler must return None or a valid move, never crash.
     for _ in range(50):
-        move = propose_random_move([[1]], rng)
+        move = propose_random_move([[1]], rng, p)
         assert move is None
+
+
+def test_biased_proposals_preserve_multiset_with_neighbor_lists():
+    # Same invariant as above, but on a problem WITH candidate lists, so the
+    # neighbor-biased relocate/swap branches are exercised.
+    from app.scenarios import SCENARIOS
+    from app.solver.model import build_routing_problem
+
+    p = build_routing_problem(SCENARIOS["metro-manila"]["problem"])
+    assert p.neighbors and len(p.neighbors) == p.n + 1
+    rng = random.Random(77)
+    nodes = list(range(1, p.n + 1))
+    solution = [nodes[:9], nodes[9:17], nodes[17:]]
+    all_stops = sorted(n for r in solution for n in r)
+    for _ in range(2000):
+        move = propose_random_move(solution, rng, p)
+        assert move is not None
+        move.apply(solution)
+        assert sorted(n for r in solution for n in r) == all_stops

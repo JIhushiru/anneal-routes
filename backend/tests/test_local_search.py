@@ -73,7 +73,7 @@ def test_descent_output_is_a_local_optimum_for_random_moves():
     base = solution_cost(sol, p)
     rng = random.Random(13)
     for _ in range(3000):
-        move = propose_random_move([r[:] for r in sol], rng)
+        move = propose_random_move([r[:] for r in sol], rng, p)
         if move is None:
             continue
         candidate = [r[:] for r in sol]
