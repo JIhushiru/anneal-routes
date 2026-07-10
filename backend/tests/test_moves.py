@@ -64,6 +64,19 @@ def test_or_opt_relocate_rejects_bad_chain():
         or_opt_relocate([1, 2, 3], 2, 2, 0)
 
 
+def test_two_opt_star_exchanges_tails():
+    from app.solver.moves import two_opt_star_exchange
+
+    a, b = two_opt_star_exchange([1, 2, 3, 4], [5, 6, 7], 2, 1)
+    assert a == [1, 2, 6, 7]
+    assert b == [5, 3, 4]
+    # Cutting against an empty route splits a tour.
+    a, b = two_opt_star_exchange([1, 2, 3, 4], [], 2, 0)
+    assert a == [1, 2] and b == [3, 4]
+    # Multiset always preserved.
+    assert sorted(a + b) == [1, 2, 3, 4]
+
+
 # ------------------------------------------------- 2-opt optimality on convex points
 
 

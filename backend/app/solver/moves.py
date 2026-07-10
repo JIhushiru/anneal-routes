@@ -11,11 +11,14 @@ Moves implemented (names follow the VRP literature):
 
 * ``two_opt``          — intra-route: reverse a segment, removing two crossing edges.
 * ``or_opt``           — intra-route: relocate a chain of 1-3 consecutive stops.
-* ``relocate``         — inter-route: move one stop to another route (possibly empty).
+* ``relocate``         — inter-route: move a chain of 1-3 stops to another route.
 * ``swap``             — inter-route: exchange one stop between two routes.
+* ``two_opt_star``     — inter-route: cut two routes and exchange their tails
+  (Potvin & Rousseau's 2-opt*), the canonical CVRPTW move — it preserves both
+  route prefixes, so with time windows the feasible part of each route survives.
 
-Together these connect the search space: relocate/swap redistribute stops across
-vehicles (load balancing), while 2-opt and or-opt untangle each vehicle's tour.
+Together these connect the search space: relocate/swap/2-opt* redistribute stops
+across vehicles (load balancing), while 2-opt and or-opt untangle each tour.
 """
 
 from __future__ import annotations
@@ -162,6 +165,40 @@ def propose_relocate(solution: Solution, rng: random.Random, p: RoutingProblem) 
     return Move("relocate", (src, dst), (new_src, new_dst))
 
 
+def two_opt_star_exchange(
+    route_a: Route, route_b: Route, i: int, j: int
+) -> tuple[Route, Route]:
+    """Cut A after position i-1 and B after position j-1; exchange the tails."""
+    if not 0 <= i <= len(route_a) or not 0 <= j <= len(route_b):
+        raise ValueError(f"invalid 2-opt* cuts i={i}, j={j}")
+    return route_a[:i] + route_b[j:], route_b[:j] + route_a[i:]
+
+
+def propose_two_opt_star(
+    solution: Solution, rng: random.Random, p: RoutingProblem
+) -> Move | None:
+    """Exchange the tails of two routes at random cut points.
+
+    Empty partners are allowed on purpose: a cut against an empty route splits
+    an overloaded tour in two, which is how the search opens a fresh vehicle in
+    one move instead of relocating stops one by one.
+    """
+    if len(solution) < 2:
+        return None
+    non_empty = [k for k, r in enumerate(solution) if r]
+    if not non_empty:
+        return None
+    a = rng.choice(non_empty)
+    b = rng.choice([k for k in range(len(solution)) if k != a])
+    ra, rb = solution[a], solution[b]
+    i = rng.randrange(0, len(ra) + 1)
+    j = rng.randrange(0, len(rb) + 1)
+    if (i == 0 and j == 0) or (i == len(ra) and j == len(rb)):
+        return None  # whole-route swap / no-op: relabelings, never a cost change
+    new_a, new_b = two_opt_star_exchange(ra, rb, i, j)
+    return Move("two_opt_star", (a, b), (new_a, new_b))
+
+
 def propose_swap(solution: Solution, rng: random.Random, p: RoutingProblem) -> Move | None:
     """Exchange one stop between two routes, biased toward swapping with one of
     the picked stop's k nearest neighbors (same rationale as relocate)."""
@@ -198,10 +235,11 @@ def propose_swap(solution: Solution, rng: random.Random, p: RoutingProblem) -> M
 # roughly equal probability mass, which worked best across the demo scenarios
 # (see README benchmarks). Exposed as a constant so experiments are one edit away.
 MOVE_MENU = (
-    (propose_two_opt, 0.30),
-    (propose_or_opt, 0.20),
-    (propose_relocate, 0.30),
-    (propose_swap, 0.20),
+    (propose_two_opt, 0.25),
+    (propose_or_opt, 0.15),
+    (propose_relocate, 0.25),
+    (propose_swap, 0.15),
+    (propose_two_opt_star, 0.20),
 )
 
 

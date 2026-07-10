@@ -24,7 +24,7 @@ from typing import Optional
 
 from .evaluate import RouteEval, evaluate_route
 from .model import RoutingProblem, Solution
-from .moves import or_opt_relocate, two_opt_reverse
+from .moves import or_opt_relocate, two_opt_reverse, two_opt_star_exchange
 
 # Check the clock every N candidate evaluations, not every one.
 _DEADLINE_STRIDE = 256
@@ -106,6 +106,25 @@ class _Descent:
                                 return True
         return False
 
+    def _scan_two_opt_star(self) -> bool:
+        for a in range(len(self.sol)):
+            for b in range(len(self.sol)):
+                if a == b:
+                    continue
+                ra, rb = self.sol[a], self.sol[b]
+                if not ra:
+                    continue
+                for i in range(len(ra) + 1):
+                    for j in range(len(rb) + 1):
+                        if (i == 0 and j == 0) or (i == len(ra) and j == len(rb)):
+                            continue
+                        if self._expired():
+                            return False
+                        new_a, new_b = two_opt_star_exchange(ra, rb, i, j)
+                        if self._try((a, b), (new_a, new_b)):
+                            return True
+        return False
+
     def _scan_swap(self) -> bool:
         for a in range(len(self.sol)):
             for b in range(a + 1, len(self.sol)):
@@ -121,7 +140,13 @@ class _Descent:
         return False
 
     def run(self) -> Solution:
-        scans = (self._scan_two_opt, self._scan_or_opt, self._scan_relocate, self._scan_swap)
+        scans = (
+            self._scan_two_opt,
+            self._scan_or_opt,
+            self._scan_relocate,
+            self._scan_swap,
+            self._scan_two_opt_star,
+        )
         improved = True
         while improved and not self.out_of_time:
             improved = any(scan() for scan in scans)
