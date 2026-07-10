@@ -16,7 +16,7 @@ directly comparable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Sequence
+from typing import Optional
 
 from ..schemas import Problem
 from .distance import haversine_matrix
@@ -24,9 +24,6 @@ from .distance import haversine_matrix
 # One vehicle's visit order (node indices, depot excluded), and a full solution.
 Route = list[int]
 Solution = list[Route]
-
-# Optional replacement matrix builder, e.g. the OSRM road-distance matrix.
-MatrixBuilder = Callable[[Sequence[tuple[float, float]]], list[list[float]]]
 
 
 @dataclass(frozen=True)
@@ -46,17 +43,23 @@ class RoutingProblem:
 
 
 def build_routing_problem(
-    problem: Problem, matrix_builder: Optional[MatrixBuilder] = None
+    problem: Problem,
+    dist_km: Optional[list[list[float]]] = None,
+    time_min: Optional[list[list[float]]] = None,
 ) -> RoutingProblem:
     """Flatten a wire-format ``Problem`` into matrices and per-node arrays.
 
-    ``matrix_builder`` overrides the default haversine matrix (used for OSRM road
-    distances); it receives the same (lat, lon) list with the depot at index 0.
+    ``dist_km``/``time_min`` override the default haversine matrix and the
+    speed-derived travel times — this is how OSRM road distances and real driving
+    durations are injected. Node 0 is the depot in both matrices.
     """
     coords = [(problem.depot.lat, problem.depot.lon)] + [(s.lat, s.lon) for s in problem.stops]
-    dist = (matrix_builder or haversine_matrix)(coords)
-    minutes_per_km = 60.0 / problem.speed_kmh
-    time = [[d * minutes_per_km for d in row] for row in dist]
+    dist = dist_km if dist_km is not None else haversine_matrix(coords)
+    if time_min is None:
+        minutes_per_km = 60.0 / problem.speed_kmh
+        time = [[d * minutes_per_km for d in row] for row in dist]
+    else:
+        time = time_min
 
     tw: list[Optional[tuple[float, float]]] = [None]
     for s in problem.stops:
