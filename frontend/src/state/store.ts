@@ -64,6 +64,7 @@ interface AppStore {
   comparisonMode: boolean;
   timeLimitS: number;
   saIterations: number;
+  saChains: number;
 
   // --- run state (single runs live in A; comparison uses A then B)
   runs: Record<RunKey, RunState>;
@@ -92,11 +93,11 @@ let cancelled = false;
 
 export const useStore = create<AppStore>((set, get) => {
   function buildParams(algorithm: Algorithm): SolveParams {
-    const { timeLimitS, saIterations } = get();
+    const { timeLimitS, saIterations, saChains } = get();
     return {
       algorithm,
       time_limit_s: timeLimitS,
-      sa: { iterations: saIterations },
+      sa: { iterations: saIterations, chains: saChains },
     };
   }
 
@@ -169,6 +170,7 @@ export const useStore = create<AppStore>((set, get) => {
     comparisonMode: false,
     timeLimitS: 10,
     saIterations: 500_000,
+    saChains: 1,
 
     runs: { A: idleRun(), B: idleRun() },
     running: false,

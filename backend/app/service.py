@@ -22,6 +22,7 @@ from .solver.evaluate import evaluate_solution
 from .solver.model import RoutingProblem, Solution, build_routing_problem, routes_to_stop_ids
 from .solver.nearest_neighbor import solve_nearest_neighbor
 from .solver.ortools_solver import solve_ortools
+from .solver.parallel import solve_sa_parallel
 from .solver.sa import anneal
 
 EmitFn = Callable[[ProgressEvent], None]
@@ -165,7 +166,37 @@ def run_solver_streaming(
             unassigned_nodes=result.unassigned,
         )
 
-    # Simulated annealing
+    # Simulated annealing — parallel best-of-N chains when requested
+    if params.sa.chains > 1:
+        def on_chain_event(ev) -> None:
+            emit(
+                ProgressEvent(
+                    iteration=ev.iteration_total,
+                    temperature=ev.temperature,
+                    best_cost=ev.best_cost,
+                    current_cost=ev.current_cost,
+                    best_distance_km=ev.best_distance_km,
+                    elapsed_ms=(time.perf_counter() - started) * 1000,
+                    improved=ev.improved,
+                    routes=routes_to_stop_ids(ev.best_routes, p),
+                )
+            )
+
+        result = solve_sa_parallel(
+            p,
+            params.sa,
+            time_limit_s=params.time_limit_s,
+            on_event=on_chain_event,
+            should_stop=should_stop,
+        )
+        return build_solve_result(
+            params.algorithm,
+            result.best,
+            p,
+            (time.perf_counter() - started) * 1000,
+            iterations=result.iterations,
+        )
+
     last_event = None
     for event in anneal(p, params.sa, time_limit_s=params.time_limit_s):
         last_event = event

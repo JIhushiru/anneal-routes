@@ -35,6 +35,7 @@ export interface SAParams {
   iterations: number;
   start_accept_worse_pct?: number;
   end_accept_worse_pct?: number;
+  chains?: number;
   seed?: number | null;
 }
 

@@ -33,6 +33,7 @@ from app.solver.evaluate import is_feasible, solution_distance  # noqa: E402
 from app.solver.model import build_routing_problem  # noqa: E402
 from app.solver.nearest_neighbor import solve_nearest_neighbor  # noqa: E402
 from app.solver.ortools_solver import solve_ortools  # noqa: E402
+from app.solver.parallel import solve_sa_parallel  # noqa: E402
 from app.solver.sa import solve_sa  # noqa: E402
 
 
@@ -44,6 +45,10 @@ def main() -> None:
     ap.add_argument(
         "--only", action="append", choices=list(SCENARIOS), default=None,
         help="run a subset of scenarios (repeatable) — for quick ablation gates",
+    )
+    ap.add_argument(
+        "--chains", type=int, default=0,
+        help="also benchmark parallel SA with N chains (0 = skip)",
     )
     args = ap.parse_args()
 
@@ -92,21 +97,48 @@ def main() -> None:
             },
         }
 
+        if args.chains > 1:
+            par_dists, par_times = [], []
+            for seed in range(1, args.sa_runs + 1):
+                r = solve_sa_parallel(
+                    p,
+                    SAParams(iterations=5_000_000, seed=seed, chains=args.chains),
+                    time_limit_s=args.time_limit,
+                )
+                assert is_feasible(r.best, p), f"{key}: parallel SA seed {seed} infeasible"
+                par_dists.append(r.best_distance_km)
+                par_times.append(r.runtime_ms)
+                print(f"  SA x{args.chains} s={seed} {r.best_distance_km:8.2f} km   "
+                      f"{r.runtime_ms:8.1f} ms  ({r.iterations:,} total iters)")
+            results[key]["sa_parallel"] = {
+                "chains": args.chains,
+                "best_km": round(min(par_dists), 2),
+                "mean_km": round(statistics.mean(par_dists), 2),
+                "worst_km": round(max(par_dists), 2),
+                "mean_ms": round(statistics.mean(par_times)),
+                "runs": args.sa_runs,
+            }
+
     print("\n\n--- README markdown ---\n")
+    par_col = f" SA ({args.chains} chains) mean |" if args.chains > 1 else ""
     print(f"| Scenario | Greedy (NN) | OR-Tools ({args.time_limit:.0f} s cap) | "
-          f"SA best of {args.sa_runs} | SA mean | SA vs OR-Tools |")
-    print("|---|---|---|---|---|---|")
+          f"SA best of {args.sa_runs} | SA mean |{par_col} SA vs OR-Tools |")
+    print("|---|---|---|---|---|" + ("---|" if args.chains > 1 else "") + "---|")
     any_nn_infeasible = False
     for r in results.values():
-        gap = (r["sa"]["best_km"] - r["ortools"]["dist_km"]) / r["ortools"]["dist_km"] * 100
+        best_sa = min(r["sa"]["best_km"], r.get("sa_parallel", {}).get("best_km", float("inf")))
+        gap = (best_sa - r["ortools"]["dist_km"]) / r["ortools"]["dist_km"] * 100
         nn_note = "" if r["nn"]["feasible"] else " †"
         any_nn_infeasible = any_nn_infeasible or not r["nn"]["feasible"]
+        par_cell = (
+            f" {r['sa_parallel']['mean_km']} km |" if "sa_parallel" in r else ""
+        )
         print(
             f"| {r['name']} | {r['nn']['dist_km']} km{nn_note} ({r['nn']['ms']:.0f} ms) "
             f"| {r['ortools']['dist_km']} km ({r['ortools']['ms']/1000:.1f} s) "
             f"| **{r['sa']['best_km']} km** ({r['sa']['mean_ms']/1000:.1f} s) "
             f"| {r['sa']['mean_km']} km "
-            f"| {gap:+.1f}% |"
+            f"|{par_cell} {gap:+.1f}% |"
         )
     if any_nn_infeasible:
         print("\n† greedy ignores time windows; this solution violates at least one window.")

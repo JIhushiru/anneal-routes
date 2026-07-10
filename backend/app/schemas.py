@@ -93,6 +93,11 @@ class SAParams(BaseModel):
         default=0.01, gt=0, le=100,
         description="Tf: same rule at the final iteration (effectively pure descent)",
     )
+    chains: int = Field(
+        default=1, ge=1, le=16,
+        description="Independent SA runs in parallel processes; the best incumbent wins "
+        "(best-of-N stochastic dominance at the same wall clock)",
+    )
     seed: Optional[int] = Field(default=None, description="RNG seed for reproducible runs")
 
 

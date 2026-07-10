@@ -185,6 +185,17 @@ export function SolverPanel() {
             disabled={s.running}
           />
         </label>
+        <label title="Independent annealing runs in parallel processes; best result wins">
+          SA chains
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={s.saChains}
+            onChange={(e) => s.patch({ saChains: clampInt(e.target.value, 1, 8) })}
+            disabled={s.running}
+          />
+        </label>
       </div>
 
       {s.running ? (
