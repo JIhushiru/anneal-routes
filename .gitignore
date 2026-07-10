@@ -27,3 +27,6 @@ benchmarks/raw/
 Thumbs.db
 .vscode/
 .idea/
+
+# TypeScript incremental build state
+*.tsbuildinfo
