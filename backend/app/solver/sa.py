@@ -183,9 +183,20 @@ def anneal(
 
         move = propose_random_move(current, rng)
         if move is not None:
-            old_cost = sum(evals[i].penalized_cost for i in move.route_indices)
-            new_evals = [evaluate_route(r, p) for r in move.new_routes]
-            delta = sum(e.penalized_cost for e in new_evals) - old_cost
+            # Unrolled cost arithmetic: moves touch one or two routes, and this
+            # runs ~10^6 times per solve — generator+sum overhead is measurable.
+            indices = move.route_indices
+            if len(indices) == 1:
+                old_cost = evals[indices[0]].penalized_cost
+                new_evals = [evaluate_route(move.new_routes[0], p, False)]
+                delta = new_evals[0].penalized_cost - old_cost
+            else:
+                old_cost = evals[indices[0]].penalized_cost + evals[indices[1]].penalized_cost
+                new_evals = [
+                    evaluate_route(move.new_routes[0], p, False),
+                    evaluate_route(move.new_routes[1], p, False),
+                ]
+                delta = new_evals[0].penalized_cost + new_evals[1].penalized_cost - old_cost
 
             # Metropolis criterion: always accept downhill, accept uphill with
             # probability exp(-delta/T).

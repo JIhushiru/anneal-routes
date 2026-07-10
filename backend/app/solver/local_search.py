@@ -34,7 +34,7 @@ class _Descent:
     def __init__(self, solution: Solution, p: RoutingProblem, deadline: Optional[float]):
         self.p = p
         self.sol: Solution = [r[:] for r in solution]
-        self.evals: list[RouteEval] = [evaluate_route(r, p) for r in self.sol]
+        self.evals: list[RouteEval] = [evaluate_route(r, p, False) for r in self.sol]
         self.deadline = deadline
         self._budget_checks = 0
         self.out_of_time = False
@@ -50,7 +50,7 @@ class _Descent:
     def _try(self, route_indices: tuple[int, ...], new_routes: tuple[list[int], ...]) -> bool:
         """Apply the candidate iff it strictly improves the penalized cost."""
         old = sum(self.evals[k].penalized_cost for k in route_indices)
-        new_evals = [evaluate_route(r, self.p) for r in new_routes]
+        new_evals = [evaluate_route(r, self.p, False) for r in new_routes]
         if sum(e.penalized_cost for e in new_evals) < old - 1e-9:
             for k, route, ev in zip(route_indices, new_routes, new_evals):
                 self.sol[k] = route

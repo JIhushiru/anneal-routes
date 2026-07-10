@@ -153,24 +153,35 @@ MOVE_MENU = (
 )
 
 
+# Precomputed dispatch tables: the sampler runs a million times per solve, so
+# the cumulative thresholds and function order are baked once at import.
+_MENU_FNS = tuple(fn for fn, _ in MOVE_MENU)
+_MENU_TOTAL = sum(w for _, w in MOVE_MENU)
+_MENU_CUM = tuple(
+    sum(w for _, w in MOVE_MENU[: i + 1]) for i in range(len(MOVE_MENU))
+)
+
+
 def propose_random_move(solution: Solution, rng: random.Random) -> Move | None:
     """Sample a move kind by weight, then a uniformly random instance of that kind.
 
     Falls back through the menu if the sampled kind is inapplicable (e.g. swap
     with a single non-empty route), returning None only when nothing applies.
+    (The dispatch consumes exactly one rng.random() and tries kinds in the same
+    order as the original scan, so fixed-seed runs are bit-for-bit unchanged.)
     """
-    r = rng.random() * sum(w for _, w in MOVE_MENU)
-    acc = 0.0
-    order = []
-    for fn, w in MOVE_MENU:
-        acc += w
-        if r <= acc and not order:
-            order.append(fn)
-    # Try the sampled kind first, then the rest as fallback.
-    for fn, _ in MOVE_MENU:
-        if fn not in order:
-            order.append(fn)
-    for fn in order:
+    r = rng.random() * _MENU_TOTAL
+    first = 0
+    for i, threshold in enumerate(_MENU_CUM):
+        if r <= threshold:
+            first = i
+            break
+    move = _MENU_FNS[first](solution, rng)
+    if move is not None:
+        return move
+    for i, fn in enumerate(_MENU_FNS):
+        if i == first:
+            continue
         move = fn(solution, rng)
         if move is not None:
             return move
