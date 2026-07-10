@@ -91,11 +91,22 @@ from dataclasses import dataclass
 from typing import Iterator, Optional
 
 from ..schemas import SAParams
+from .clarke_wright import solve_clarke_wright
 from .evaluate import evaluate_route
 from .local_search import descend
 from .model import RoutingProblem, Solution
 from .moves import propose_random_move
 from .nearest_neighbor import solve_nearest_neighbor
+
+
+def _warm_start(p: RoutingProblem) -> Solution:
+    """The better of the two constructions — both are O(n^2)-cheap, so trying
+    both and keeping the winner costs microseconds against a seconds budget."""
+    nn = solve_nearest_neighbor(p)
+    cw = solve_clarke_wright(p)
+    nn_cost = sum(evaluate_route(r, p, False).penalized_cost for r in nn)
+    cw_cost = sum(evaluate_route(r, p, False).penalized_cost for r in cw)
+    return cw if cw_cost < nn_cost else nn
 
 # Yield a non-improving "tick" event this often, so the temperature curve and
 # current-cost trace stream smoothly even between incumbent improvements.
@@ -154,7 +165,7 @@ def anneal(
     rng = random.Random(params.seed)
     started = time.perf_counter()
 
-    current: Solution = [r[:] for r in (initial or solve_nearest_neighbor(p))]
+    current: Solution = [r[:] for r in (initial or _warm_start(p))]
     # Pad with empty routes so relocate can open unused vehicles.
     while len(current) < p.vehicles:
         current.append([])
