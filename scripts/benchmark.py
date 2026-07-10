@@ -126,8 +126,10 @@ def main() -> None:
     print("|---|---|---|---|---|" + ("---|" if args.chains > 1 else "") + "---|")
     any_nn_infeasible = False
     for r in results.values():
-        best_sa = min(r["sa"]["best_km"], r.get("sa_parallel", {}).get("best_km", float("inf")))
-        gap = (best_sa - r["ortools"]["dist_km"]) / r["ortools"]["dist_km"] * 100
+        # Gap from the single-chain best — the number actually printed (and
+        # bolded) in the table; mixing in the parallel best could cite a value
+        # that appears nowhere in the row.
+        gap = (r["sa"]["best_km"] - r["ortools"]["dist_km"]) / r["ortools"]["dist_km"] * 100
         nn_note = "" if r["nn"]["feasible"] else " †"
         any_nn_infeasible = any_nn_infeasible or not r["nn"]["feasible"]
         par_cell = (

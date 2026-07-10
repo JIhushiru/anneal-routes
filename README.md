@@ -84,10 +84,14 @@ flowchart LR
         REST["/api/scenarios · /api/solve"]
         SVC["service.py<br/>orchestration"]
         subgraph Solvers["solver/"]
-            SA["sa.py — simulated annealing<br/>2-opt · or-opt · relocate · swap"]
+            SA["sa.py — simulated annealing<br/>2-opt · or-opt · relocate · swap · 2-opt*"]
+            LS["local_search.py — descent polish"]
+            PAR["parallel.py — best-of-N chains"]
             OT["ortools_solver.py — CVRPTW<br/>guided local search"]
-            NN["nearest_neighbor.py — greedy"]
+            NN["nearest_neighbor.py + clarke_wright.py<br/>constructions / warm starts"]
             EV["evaluate.py — feasibility +<br/>penalized cost (shared by all)"]
+            SA --- LS
+            PAR --- SA
         end
     end
 
@@ -306,7 +310,12 @@ a 5-seed benchmark on the 50-stop instance (means carry roughly ±1.5 km of seed
 | + candidate-list bias | 258.14 | 260.78 | inter-route moves target 10-NN with p = 0.8 |
 | + 2-opt* | **256.61** | 260.96 | prefix-preserving tail exchange |
 | + Clarke–Wright warm start | 258.30 | 260.40 | accepted on the mean; restored all-seeds-optimal Metro |
-| **final, ×6 chains** | 256.61 | **258.90** | every run beats OR-Tools by 1.9–3.2% |
+| **final, ×6 chains** | 258.14 | **258.90** | every ×6 run beats OR-Tools by 1.9–2.7% |
+
+(The overall best, 256.61 km / −3.2%, came from a single-chain seed — chains dominate
+*within* a run, but a lucky lone chain with the full uninterrupted budget can still hold
+the record; see [docs/MATHEMATICS.md](docs/MATHEMATICS.md) §3.7 for the exact scope of
+the dominance guarantee.)
 
 ### Notes from tuning (what the charts caught)
 
@@ -324,7 +333,7 @@ this project:
 ## Testing
 
 ```bash
-cd backend && .venv/Scripts/python -m pytest    # 61 tests
+cd backend && .venv/Scripts/python -m pytest    # 62 tests
 ```
 
 - **2-opt correctness** — exhaustive 2-opt descent from scrambled starts must reach the
@@ -352,8 +361,11 @@ backend/
       model.py            # index-based instance, shared by all solvers
       distance.py         # haversine
       evaluate.py         # feasibility + penalized cost (single source of truth)
-      moves.py            # 2-opt, or-opt, relocate, swap
-      nearest_neighbor.py # greedy construction / SA warm start
+      moves.py            # 2-opt, or-opt, relocate, swap, 2-opt* (+ candidate-list bias)
+      nearest_neighbor.py # greedy construction
+      clarke_wright.py    # savings construction (warm start)
+      local_search.py     # deterministic descent (final polish)
+      parallel.py         # best-of-N annealing chains
       sa.py               # simulated annealing (the showpiece)
       ortools_solver.py   # OR-Tools CVRPTW wrapper
   tests/

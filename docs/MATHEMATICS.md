@@ -180,15 +180,16 @@ both route *prefixes*, so with time windows the already-feasible early part of e
 route survives the exchange; cutting against an empty route splits an overloaded
 tour, opening a fresh vehicle in one step.
 
-**Proposal distribution.** Move kinds are sampled with fixed weights, but the
-inter-route moves are not position-uniform: with probability $0.8$ the target is
+**Proposal distribution.** Move kinds are sampled with fixed weights, but relocate
+and swap are not position-uniform: with probability $0.8$ the target is
 chosen adjacent to one of the moved stop's $k = 10$ nearest neighbors (a
 *candidate list*). The geometry of the problem says an improving inter-route move
 almost always reconnects near neighbors, so uniform proposals waste most of their
 draws at low temperature; biasing multiplies the useful-proposal rate. The
 remaining $0.2$ stays uniform on purpose — it preserves the connectivity of the
 proposal graph (empty routes and long-range moves stay reachable), so exploration
-never dies entirely.
+never dies entirely. 2-opt* keeps uniformly random cut points: its power is
+structural, not geometric.
 
 ### 3.2 The Metropolis rule
 
@@ -298,8 +299,9 @@ away from the truth.
 
 ### 3.6 Warm start
 
-The initial solution is the better of two $O(n^2)$ constructions: greedy
-nearest-neighbor (§4.2) and Clarke–Wright parallel savings (1964), which merges
+The initial solution is the better of two cheap constructions (
+$O(n^2)$ greedy nearest-neighbor, §4.2, and $\Theta(n^2 \log n)$ — the savings
+sort dominates — Clarke–Wright parallel savings, 1964), which merges
 out-and-back routes in decreasing order of the saving
 $s(i,j) = d_{0i} + d_{0j} - d_{ij}$ subject to capacity. Trying both costs
 microseconds against a seconds budget. With $w_{\text{start}} = 5\%$ the early phase
@@ -330,11 +332,16 @@ $$
 \min(X_1, \dots, X_N) \le X_1 \quad \text{per draw,}
 $$
 
-so at the same wall clock the result is weakly better than any single chain's — and
+so the result is weakly better than any single chain *of the same run* — and
 run-to-run variance collapses toward the best-of-$N$ distribution, which is what
-makes the benchmark numbers stable. The wall-clock deadline is fixed *before* the
-processes spawn, so process startup eats into the chains' budget rather than
-extending it: a 10-second parallel solve really takes 10 seconds.
+makes the benchmark numbers stable. Scope this claim precisely: it does **not**
+promise dominance over a separately-run single-chain solve at the same wall clock,
+because the deadline is fixed *before* the processes spawn (startup eats into the
+chains' budget rather than extending it — a 10-second parallel solve really takes
+10 seconds), and the budget-driven cooling schedule contracts accordingly. The
+benchmark table shows exactly this: the ×6 mode's *mean* is better, while the
+overall best (256.61 km) belongs to a lucky single-chain seed with the full
+uninterrupted budget.
 
 ---
 
@@ -362,8 +369,9 @@ scaling preserves convexity and crossings, so the argument survives haversine.)
 Nearest-neighbor construction — each vehicle repeatedly drives to the closest unvisited
 stop that fits its remaining capacity — is a *deliberately weak* control: deterministic,
 window-blind, sub-millisecond. Its job is to answer "what does the optimization
-actually buy?" (31.9–58.0% distance reduction, per the benchmark table) and to provide
-the warm start. A known greedy pathology is visible in the data: on the 50-stop
+actually buy?" (greedy tours are 31.9–58.0% *longer* than the reference solutions —
+equivalently, optimization cuts 24.2–36.7% off the greedy distance) and to provide a
+warm-start candidate. A known greedy pathology is visible in the data: on the 50-stop
 scenario it strands far-flung stops for last and violates their windows.
 
 ### 4.3 Benchmark methodology
@@ -380,7 +388,7 @@ The claims in the README table are constructed to be *falsifiable*:
 - feasibility of every reported solution is *asserted* by the checker, so "distance"
   comparisons are never quietly comparing a feasible tour against an infeasible one.
 
-Reproduce with `backend/.venv/Scripts/python scripts/benchmark.py --time-limit 10 --sa-runs 5`.
+Reproduce with `backend/.venv/Scripts/python scripts/benchmark.py --time-limit 10 --sa-runs 5 --chains 6`.
 
 ---
 

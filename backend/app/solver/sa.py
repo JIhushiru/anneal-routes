@@ -68,10 +68,11 @@ f(S_0) is immune to the shape of the move distribution.
 
 Initial solution
 ----------------
-Nearest-neighbor (see nearest_neighbor.py). Annealing from a greedy tour rather
-than a random permutation lets the whole budget refine plausible solutions; the
-high initial acceptance ratio still provides enough melt to leave the greedy
-basin, so the warm start costs nothing in exploration.
+The better of nearest-neighbor and Clarke-Wright savings construction (see
+_warm_start). Annealing from a constructed tour rather than a random permutation
+lets the whole budget refine plausible solutions; the initial acceptance ratio
+still provides enough melt to leave the construction's basin, so the warm start
+costs nothing in exploration.
 
 Final polish
 ------------
@@ -88,7 +89,7 @@ import math
 import random
 import time
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 from ..schemas import SAParams
 from .clarke_wright import solve_clarke_wright
@@ -157,9 +158,13 @@ def anneal(
     params: Optional[SAParams] = None,
     time_limit_s: float = 30.0,
     initial: Optional[Solution] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> Iterator[SAEvent]:
     """Run SA, yielding an event on every new incumbent and every TICK_EVERY
     iterations. The last event has ``final=True`` and carries the best solution.
+
+    ``should_stop`` reaches the final descent, which otherwise runs between
+    yields and would be blind to a cancel for its whole window.
     """
     params = params or SAParams()
     rng = random.Random(params.seed)
@@ -237,7 +242,7 @@ def anneal(
                 break
 
     # Deterministic polish on whatever time remains (never worsens the incumbent).
-    polished = descend(best, p, deadline=started + time_limit_s)
+    polished = descend(best, p, deadline=started + time_limit_s, should_stop=should_stop)
     polished_evals = [evaluate_route(r, p) for r in polished]
     polished_cost = sum(e.penalized_cost for e in polished_evals)
     if polished_cost < best_cost - 1e-9:

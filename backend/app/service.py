@@ -171,7 +171,7 @@ def run_solver_streaming(
         def on_chain_event(ev) -> None:
             emit(
                 ProgressEvent(
-                    iteration=ev.iteration_total,
+                    iteration=ev.iteration,
                     temperature=ev.temperature,
                     best_cost=ev.best_cost,
                     current_cost=ev.current_cost,
@@ -198,7 +198,7 @@ def run_solver_streaming(
         )
 
     last_event = None
-    for event in anneal(p, params.sa, time_limit_s=params.time_limit_s):
+    for event in anneal(p, params.sa, time_limit_s=params.time_limit_s, should_stop=should_stop):
         last_event = event
         emit(
             ProgressEvent(

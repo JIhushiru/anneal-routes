@@ -67,6 +67,23 @@ def test_anneal_event_stream_invariants():
     assert final.best_cost == pytest.approx(solution_cost(final.best_solution, p))
 
 
+def test_sa_handles_single_stop_problem():
+    # Regression: at n=1 the lone stop's candidate list is empty; the biased
+    # relocate used to call randrange(0) and crash the whole solve.
+    from app.schemas import Depot, Fleet, Problem, Stop
+
+    problem = Problem(
+        depot=Depot(lat=14.6, lon=121.0),
+        stops=[Stop(id=1, lat=14.61, lon=121.01, demand=1,
+                    tw_start=None, tw_end=None, service_time=5)],
+        fleet=Fleet(count=3, capacity=10),
+        speed_kmh=30,
+    )
+    p = build_routing_problem(problem)
+    result = solve_sa(p, SAParams(iterations=5_000, seed=1), time_limit_s=30)
+    assert is_feasible(result.best, p)
+
+
 def test_sa_respects_vehicle_count():
     p = build_routing_problem(SCENARIOS["metro-manila"]["problem"])
     result = solve_sa(p, SAParams(iterations=20_000, seed=7), time_limit_s=30)

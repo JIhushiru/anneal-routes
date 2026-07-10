@@ -147,8 +147,10 @@ def propose_relocate(solution: Solution, rng: random.Random, p: RoutingProblem) 
     chain = src_route[start : start + length]
     new_src = src_route[:start] + src_route[start + length :]
 
-    if p.neighbors and rng.random() < P_NEIGHBOR:
-        nbrs = p.neighbors[chain[0]]
+    # Guard the PER-NODE list, not just the outer tuple: at n=1 the lone stop's
+    # candidate list is empty and randrange(0) would raise.
+    nbrs = p.neighbors[chain[0]] if p.neighbors else ()
+    if nbrs and rng.random() < P_NEIGHBOR:
         anchor = nbrs[rng.randrange(len(nbrs))]
         loc = _locate(solution, anchor, exclude=src)
         if loc is not None:
@@ -209,8 +211,8 @@ def propose_swap(solution: Solution, rng: random.Random, p: RoutingProblem) -> M
     ra = solution[a]
     ia = rng.randrange(len(ra))
 
-    if p.neighbors and rng.random() < P_NEIGHBOR:
-        nbrs = p.neighbors[ra[ia]]
+    nbrs = p.neighbors[ra[ia]] if p.neighbors else ()
+    if nbrs and rng.random() < P_NEIGHBOR:
         anchor = nbrs[rng.randrange(len(nbrs))]
         loc = _locate(solution, anchor, exclude=a)
         if loc is not None:

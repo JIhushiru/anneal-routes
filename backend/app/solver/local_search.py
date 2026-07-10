@@ -20,7 +20,7 @@ order keeps the whole descent deterministic — same input, same output.
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from .evaluate import RouteEval, evaluate_route
 from .model import RoutingProblem, Solution
@@ -31,20 +31,31 @@ _DEADLINE_STRIDE = 256
 
 
 class _Descent:
-    def __init__(self, solution: Solution, p: RoutingProblem, deadline: Optional[float]):
+    def __init__(
+        self,
+        solution: Solution,
+        p: RoutingProblem,
+        deadline: Optional[float],
+        should_stop: Optional[Callable[[], bool]] = None,
+    ):
         self.p = p
         self.sol: Solution = [r[:] for r in solution]
         self.evals: list[RouteEval] = [evaluate_route(r, p, False) for r in self.sol]
         self.deadline = deadline
+        self.should_stop = should_stop
         self._budget_checks = 0
         self.out_of_time = False
 
     def _expired(self) -> bool:
-        if self.deadline is None:
-            return False
+        # Also polls the caller's cancel signal: the descent runs between the
+        # annealer's yields, so without this a client Stop would be blind for
+        # the whole polish window.
         self._budget_checks += 1
-        if self._budget_checks % _DEADLINE_STRIDE == 0 and time.perf_counter() > self.deadline:
-            self.out_of_time = True
+        if self._budget_checks % _DEADLINE_STRIDE == 0:
+            if self.deadline is not None and time.perf_counter() > self.deadline:
+                self.out_of_time = True
+            if self.should_stop is not None and self.should_stop():
+                self.out_of_time = True
         return self.out_of_time
 
     def _try(self, route_indices: tuple[int, ...], new_routes: tuple[list[int], ...]) -> bool:
@@ -154,13 +165,17 @@ class _Descent:
 
 
 def descend(
-    solution: Solution, p: RoutingProblem, deadline: Optional[float] = None
+    solution: Solution,
+    p: RoutingProblem,
+    deadline: Optional[float] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> Solution:
     """First-improvement descent to a local optimum of the penalized objective.
 
     ``deadline`` is an absolute ``time.perf_counter()`` value; pass None for an
     unbounded descent (it always terminates: each step strictly reduces a cost
-    that is bounded below, over a finite solution set).
+    that is bounded below, over a finite solution set). ``should_stop`` is
+    polled periodically so cancels reach a descent in progress.
     Guarantee: cost(result) <= cost(solution), always.
     """
-    return _Descent(solution, p, deadline).run()
+    return _Descent(solution, p, deadline, should_stop).run()

@@ -6,9 +6,13 @@ GILs), keep the best incumbent. By stochastic dominance,
 
     min(chain_1, ..., chain_N)  <=  chain_1     (always, per draw)
 
-so at a fixed wall-clock budget the returned quality is weakly better than any
-single chain's — and the run-to-run variance collapses toward the best-of-N
-distribution, which is the property that makes benchmark numbers stable.
+so the returned quality is weakly better than any single chain *within the same
+run* — and run-to-run variance collapses toward the best-of-N distribution,
+which is the property that makes benchmark numbers stable. Note the scope: this
+does NOT guarantee dominance over a separately-run single-chain solve at the
+same wall clock, because spawn overhead shortens each chain's budget and the
+budget-driven cooling schedule contracts with it (the repo's own benchmarks show
+a single-chain seed occasionally beating the 6-chain best).
 
 Fairness accounting: the wall-clock deadline is fixed BEFORE the processes are
 spawned, so process startup (~0.5 s on Windows) eats into the chains' annealing
@@ -39,13 +43,20 @@ _SEED_STRIDE = 7919  # a prime, so derived seeds never collide across chains
 
 @dataclass(frozen=True)
 class ChainEvent:
-    """Cross-process progress report, re-emitted by the parent as it sees fit."""
+    """Cross-process progress report, re-emitted by the parent as it sees fit.
 
-    chain: int
-    iteration_total: int  # sum of iterations across all chains so far
-    temperature: float
+    The trajectory fields (iteration, temperature, current_cost) are always
+    chain 0's — interleaving N independent walks into one series would render
+    the convergence and temperature charts as a sawtooth belonging to no chain.
+    Chain 0's schedule is representative (all chains share calibration and
+    deadline), while best_cost/best_routes are the true global incumbent.
+    """
+
+    chain: int  # chain whose message triggered this event
+    iteration: int  # chain 0's iteration count (comparable to a single-chain run)
+    temperature: float  # chain 0's temperature
+    current_cost: float  # chain 0's current cost
     best_cost: float  # global best across chains
-    current_cost: float  # reporting chain's current cost
     best_distance_km: float
     improved: bool  # True when the GLOBAL best improved
     best_routes: Solution  # global best routes (node indices)
@@ -65,7 +76,9 @@ def _run_chain(
     chain_params = params.model_copy(update={"seed": seed, "chains": 1})
     last_forward = 0
     final = None
-    for event in anneal(p, chain_params, time_limit_s=time_limit_s):
+    for event in anneal(
+        p, chain_params, time_limit_s=time_limit_s, should_stop=stop_event.is_set
+    ):
         if event.final:
             final = event
             break
@@ -122,7 +135,12 @@ def solve_sa_parallel(
     best_distance = 0.0
     best: Optional[Solution] = None
     chain_iterations = [0] * n_chains
+    # Chain 0 is the designated trajectory reporter for the charts.
+    rep_iteration = 0
+    rep_temperature = 0.0
+    rep_current = float("inf")
     finals_seen = 0
+    workers_died = False
 
     while finals_seen < n_chains:
         if should_stop() and not stop_event.is_set():
@@ -132,12 +150,33 @@ def solve_sa_parallel(
         except queue_mod.Empty:
             if any(w.is_alive() for w in workers):
                 continue
-            break  # all workers died without a final — return what we have
+            # All workers gone: drain anything still buffered in the pipe, then
+            # stop waiting for finals that will never come.
+            drained = []
+            while True:
+                try:
+                    drained.append(out.get_nowait())
+                except queue_mod.Empty:
+                    break
+            if not drained:
+                workers_died = True
+                break
+            for msg in drained:
+                if msg[0] == "final":
+                    _, chain, iteration, cost, dist, routes = msg
+                    chain_iterations[chain] = iteration
+                    finals_seen += 1
+                    if cost < best_cost:
+                        best_cost, best_distance, best = cost, dist, routes
+            workers_died = finals_seen < n_chains
+            break
 
         kind = msg[0]
         if kind == "progress":
             _, chain, iteration, temperature, cost, current, dist, improved, routes = msg
             chain_iterations[chain] = iteration
+            if chain == 0:
+                rep_iteration, rep_temperature, rep_current = iteration, temperature, current
             if improved and cost < best_cost and routes is not None:
                 best_cost, best_distance, best = cost, dist, routes
                 global_improved = True
@@ -146,10 +185,10 @@ def solve_sa_parallel(
             if on_event is not None and best is not None:
                 on_event(ChainEvent(
                     chain=chain,
-                    iteration_total=sum(chain_iterations),
-                    temperature=temperature,
+                    iteration=rep_iteration,
+                    temperature=rep_temperature,
+                    current_cost=rep_current if rep_current != float("inf") else cost,
                     best_cost=best_cost,
-                    current_cost=current,
                     best_distance_km=best_distance,
                     improved=global_improved,
                     best_routes=best,
@@ -166,7 +205,13 @@ def solve_sa_parallel(
         if w.is_alive():
             w.terminate()
 
-    assert best is not None, "no chain reported a solution"
+    if best is None:
+        # Every chain died before reporting (e.g. killed externally). Surface a
+        # clear error rather than an assert; callers turn it into an error event.
+        raise RuntimeError(
+            "all annealing chains exited without reporting a solution"
+            + (" (worker processes died)" if workers_died else "")
+        )
     return SAResult(
         best=best,
         best_cost=best_cost,
