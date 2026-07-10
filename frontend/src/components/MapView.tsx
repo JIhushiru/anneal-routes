@@ -141,13 +141,17 @@ export function MapView() {
     map.on("move", () => tick());
 
     return () => {
-      map.remove();
+      map.remove(); // also destroys the depot marker's DOM element
       mapRef.current = null;
+      depotMarkerRef.current = null; // so a remount (React StrictMode) recreates it
       loadedRef.current = false;
     };
   }, []);
 
   // ------------------------------------------------------------- depot marker
+  // Note: depends on `depot` AND runs after the map-creation effect on every
+  // mount; the creation effect nulls the ref on unmount so this recreates the
+  // marker on the map instance that actually survived (StrictMode remounts).
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
