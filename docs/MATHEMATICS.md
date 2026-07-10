@@ -170,11 +170,25 @@ operators define edges between solutions:
 | or-opt | intra-route | relocate a chain of 1–3 stops within its route |
 | relocate | inter-route | move a chain of 1–3 stops to another (possibly empty) route |
 | swap | inter-route | exchange one stop between two routes |
+| 2-opt* | inter-route | cut two routes and exchange their tails (Potvin & Rousseau, 1995) |
 
 Intra-route moves refine each vehicle's tour; inter-route moves redistribute load.
 Together they make the solution graph connected — any solution can reach any other
 through a finite move sequence, which is a precondition for the convergence theory
-below to say anything at all.
+below to say anything at all. 2-opt* is the canonical CVRPTW move: it preserves
+both route *prefixes*, so with time windows the already-feasible early part of each
+route survives the exchange; cutting against an empty route splits an overloaded
+tour, opening a fresh vehicle in one step.
+
+**Proposal distribution.** Move kinds are sampled with fixed weights, but the
+inter-route moves are not position-uniform: with probability $0.8$ the target is
+chosen adjacent to one of the moved stop's $k = 10$ nearest neighbors (a
+*candidate list*). The geometry of the problem says an improving inter-route move
+almost always reconnects near neighbors, so uniform proposals waste most of their
+draws at low temperature; biasing multiplies the useful-proposal rate. The
+remaining $0.2$ stays uniform on purpose — it preserves the connectivity of the
+proposal graph (empty routes and long-range moves stay reachable), so exploration
+never dies entirely.
 
 ### 3.2 The Metropolis rule
 
@@ -205,8 +219,10 @@ distribution all the way down.
 
 (Honesty footnote: our proposal mechanism is only approximately symmetric — each move
 kind is its own inverse or has an inverse of the same kind, but the menu's fall-through
-when a kind is inapplicable skews proposal probabilities slightly. This is standard
-practice in applied SA; the guarantee degrades gracefully rather than breaking.)
+when a kind is inapplicable, and especially the candidate-list biasing above, skew
+proposal probabilities. This is standard practice in applied SA — the exact stationary
+distribution is perturbed, the mechanism survives — and the empirical gate for the
+trade is the benchmark, not the theorem.)
 
 **How slowly is "slowly enough"?** Hajek (1988) proved convergence to global optima
 requires schedules like $T_k = c/\log(k+1)$ with $c$ at least the depth of the deepest
@@ -282,10 +298,43 @@ away from the truth.
 
 ### 3.6 Warm start
 
-The initial solution is the greedy nearest-neighbor construction (§4.2), not a random
-permutation. With $w_{\text{start}} = 5\%$ the early phase still melts enough to escape
-the greedy basin, but the budget is spent refining plausible solutions rather than
-un-shuffling chaos.
+The initial solution is the better of two $O(n^2)$ constructions: greedy
+nearest-neighbor (§4.2) and Clarke–Wright parallel savings (1964), which merges
+out-and-back routes in decreasing order of the saving
+$s(i,j) = d_{0i} + d_{0j} - d_{ij}$ subject to capacity. Trying both costs
+microseconds against a seconds budget. With $w_{\text{start}} = 5\%$ the early phase
+still melts enough to escape the construction's basin, but the budget is spent
+refining plausible solutions rather than un-shuffling chaos.
+
+### 3.7 The two guaranteed post-processing steps
+
+Everything above improves the search *in expectation*; two additions improve it by
+construction:
+
+**Deterministic final polish.** The last 5% of the time budget runs a
+first-improvement descent over the full move neighborhood until a local optimum (or
+the deadline). Descent only ever applies strictly improving moves, so
+
+$$
+f(\text{polished}) \le f(\text{incumbent}) \quad \text{always.}
+$$
+
+SA ends stochastically — near the bottom of its basin, not provably at it; the
+descent finishes the job.
+
+**Parallel independent chains (best-of-$N$).** SA is sequential, but restarts are
+embarrassingly parallel: $N$ chains with different seeds run in separate processes,
+and the best incumbent wins. By stochastic dominance,
+
+$$
+\min(X_1, \dots, X_N) \le X_1 \quad \text{per draw,}
+$$
+
+so at the same wall clock the result is weakly better than any single chain's — and
+run-to-run variance collapses toward the best-of-$N$ distribution, which is what
+makes the benchmark numbers stable. The wall-clock deadline is fixed *before* the
+processes spawn, so process startup eats into the chains' budget rather than
+extending it: a 10-second parallel solve really takes 10 seconds.
 
 ---
 
@@ -342,4 +391,6 @@ Reproduce with `backend/.venv/Scripts/python scripts/benchmark.py --time-limit 1
 - D. S. Johnson, C. R. Aragon, L. A. McGeoch, C. Schevon, *Optimization by Simulated Annealing: An Experimental Evaluation, Part I*, Operations Research 37(6) (1989).
 - S. Ropke, D. Pisinger, *An Adaptive Large Neighborhood Search Heuristic for the Pickup and Delivery Problem with Time Windows*, Transportation Science 40(4) (2006).
 - G. A. Croes, *A Method for Solving Traveling-Salesman Problems*, Operations Research 6(6) (1958); I. Or, PhD thesis, Northwestern (1976).
+- J.-Y. Potvin, J.-M. Rousseau, *An Exchange Heuristic for Routeing Problems with Time Windows*, JORS 46(12) (1995).
+- G. Clarke, J. W. Wright, *Scheduling of Vehicles from a Central Depot to a Number of Delivery Points*, Operations Research 12(4) (1964).
 - C. E. Miller, A. W. Tucker, R. A. Zemlin, *Integer Programming Formulation of Traveling Salesman Problems*, JACM 7(4) (1960).

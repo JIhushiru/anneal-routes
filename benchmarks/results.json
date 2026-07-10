@@ -10,13 +10,21 @@
     },
     "ortools": {
       "dist_km": 145.33,
-      "ms": 10006
+      "ms": 10008
     },
     "sa": {
       "best_km": 145.33,
-      "mean_km": 145.7,
-      "worst_km": 146.26,
-      "mean_ms": 10002,
+      "mean_km": 145.33,
+      "worst_km": 145.33,
+      "mean_ms": 9515,
+      "runs": 5
+    },
+    "sa_parallel": {
+      "chains": 6,
+      "best_km": 145.33,
+      "mean_km": 145.33,
+      "worst_km": 145.33,
+      "mean_ms": 9605,
       "runs": 5
     }
   },
@@ -37,7 +45,15 @@
       "best_km": 176.29,
       "mean_km": 176.29,
       "worst_km": 176.29,
-      "mean_ms": 10003,
+      "mean_ms": 9506,
+      "runs": 5
+    },
+    "sa_parallel": {
+      "chains": 6,
+      "best_km": 176.29,
+      "mean_km": 176.29,
+      "worst_km": 176.29,
+      "mean_ms": 9564,
       "runs": 5
     }
   },
@@ -47,18 +63,26 @@
     "vehicles": 6,
     "nn": {
       "dist_km": 418.93,
-      "ms": 0.2,
+      "ms": 0.3,
       "feasible": false
     },
     "ortools": {
       "dist_km": 265.17,
-      "ms": 10005
+      "ms": 10002
     },
     "sa": {
-      "best_km": 261.7,
-      "mean_km": 263.22,
-      "worst_km": 264.45,
-      "mean_ms": 10002,
+      "best_km": 256.61,
+      "mean_km": 260.71,
+      "worst_km": 265.98,
+      "mean_ms": 9558,
+      "runs": 5
+    },
+    "sa_parallel": {
+      "chains": 6,
+      "best_km": 258.14,
+      "mean_km": 258.9,
+      "worst_km": 260.03,
+      "mean_ms": 9667,
       "runs": 5
     }
   }

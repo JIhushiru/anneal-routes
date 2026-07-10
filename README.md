@@ -199,7 +199,9 @@ $\pi_T(S) \propto e^{-f(S)/T}$ (the Boltzmann distribution), which concentrates 
 global minimizers as $T \to 0$ — the reason this acceptance rule and not some other
 sigmoid.
 
-**Neighborhood** (uniform random position, kind sampled 30/20/30/20):
+**Neighborhood** (kind sampled 25/15/25/15/20; inter-route targets biased toward
+each stop's 10 nearest neighbors with p = 0.8, uniform otherwise — see
+[docs/MATHEMATICS.md](docs/MATHEMATICS.md) §3.1):
 
 | move | scope | what it fixes |
 |---|---|---|
@@ -207,6 +209,7 @@ sigmoid.
 | or-opt | intra-route | relocates a chain of 1–3 stops (Or 1976) — "stranded stop" repair |
 | relocate | inter-route | moves a chain of 1–3 stops to another vehicle — load balancing |
 | swap | inter-route | exchanges two stops between vehicles |
+| 2-opt* | inter-route | exchanges route tails (Potvin & Rousseau 1995) — prefix-preserving, so time-window feasibility survives |
 
 With time windows, a change anywhere in a route shifts every downstream arrival, so
 deltas are computed by re-evaluating the touched routes in full ($O(\text{route length})$,
@@ -244,9 +247,16 @@ sits in the tail, and the schedule both starts *and ends* too hot to ever polish
 incumbent. Anchoring to a fraction of $f(S_0)$ is immune to the delta distribution's
 shape.
 
-**Warm start.** Nearest-neighbor construction, so the budget refines plausible solutions
-instead of annealing a random permutation; $w_{\text{start}} = 5\%$ still provides enough
-melt to leave the greedy basin.
+**Warm start.** The better of nearest-neighbor and Clarke–Wright savings construction,
+so the budget refines plausible solutions instead of annealing a random permutation;
+$w_{\text{start}} = 5\%$ still provides enough melt to leave the construction's basin.
+
+**Two guaranteed finishing steps.** The last 5% of the budget runs a deterministic
+first-improvement descent over the same neighborhood (never worsens the incumbent, by
+construction), and the optional *chains* mode runs N independent annealing processes
+and keeps the best — weakly better than any single chain by stochastic dominance, with
+run-to-run variance collapsing toward the best-of-N distribution. Derivations in
+[docs/MATHEMATICS.md](docs/MATHEMATICS.md) §3.7.
 
 **Why SA at all?** It is the simplest metaheuristic with a principled escape mechanism
 and a convergence guarantee in the (impractical) logarithmic-schedule limit (Hajek 1988)
@@ -260,23 +270,43 @@ All three solvers on all three demo scenarios; identical haversine matrices; SA 
 OR-Tools each capped at **10 s wall clock** (SA's iteration cap set high enough that
 time is the binding constraint); SA run 5× (seeds 1–5) because it is stochastic.
 Feasibility of every SA and OR-Tools solution is asserted, not assumed. Distances are
-pure km (no penalties active in any reported solution). Ryzen 5 5600X, Python 3.12,
-OR-Tools 9.x, 2026-07-11. Reproduce with
-`backend/.venv/Scripts/python scripts/benchmark.py --time-limit 10 --sa-runs 5`.
+pure km (no penalties active in any reported solution). "SA ×6" runs six independent
+annealing processes and keeps the best — same 10 s wall clock, spawn overhead included;
+note OR-Tools' routing GLS is single-threaded by design, so the single-chain SA column
+is the strict apples-to-apples comparison and the ×6 column is "same seconds, whole
+machine". Ryzen 5 5600X (6 cores), Python 3.12, OR-Tools 9.x, 2026-07-11. Reproduce with
+`backend/.venv/Scripts/python scripts/benchmark.py --time-limit 10 --sa-runs 5 --chains 6`.
 
-| Scenario | Greedy (NN) | OR-Tools (10 s) | SA best of 5 | SA mean | SA best vs OR-Tools |
-|---|---|---|---|---|---|
-| Metro Manila — 25 stops | 191.66 km (0.1 ms) | 145.33 km | **145.33 km** | 145.70 km | **+0.0%** |
-| Laguna — 15 stops | 241.96 km (0.0 ms) | 176.29 km | **176.29 km** | 176.29 km | **+0.0%** |
-| Random — 50 stops | 418.93 km † (0.2 ms) | 265.17 km | **261.70 km** | 263.22 km | **−1.3%** |
+| Scenario | Greedy (NN) | OR-Tools (10 s) | SA best of 5 | SA mean | SA ×6 mean | SA best vs OR-Tools |
+|---|---|---|---|---|---|---|
+| Metro Manila — 25 stops | 191.66 km (0.1 ms) | 145.33 km | **145.33 km** | 145.33 km | 145.33 km | **+0.0%** |
+| Laguna — 15 stops | 241.96 km (0.0 ms) | 176.29 km | **176.29 km** | 176.29 km | 176.29 km | **+0.0%** |
+| Random — 50 stops | 418.93 km † (0.3 ms) | 265.17 km | **256.61 km** | 260.71 km | 258.90 km | **−3.2%** |
 
 † greedy ignores time windows; its random-50 solution violates them.
 
-Reading: SA ties OR-Tools exactly on both structured scenarios (all five Laguna seeds
-land on 176.29 km — very likely the optimum) and beats it on the 50-stop instance on
-*every* seed (worst seed 264.45 km < 265.17 km). Greedy is 32–58% worse than OR-Tools
-across the three instances (31.9% / 37.3% / 58.0%), which is the honest measure of what
-the metaheuristics buy.
+Reading: every SA run — all seeds, both modes — lands on the OR-Tools-tied value on
+both structured scenarios (145.33 and 176.29 km, very likely the optima), and on the
+50-stop instance every 6-chain run beats OR-Tools (worst 260.03 km < 265.17 km).
+Greedy is 32–58% worse than OR-Tools across the three instances (31.9% / 37.3% /
+58.0%), which is the honest measure of what the metaheuristics buy.
+
+### The improvement ladder (measured ablation)
+
+The solver reached those numbers through six gated changes, each accepted only after
+a 5-seed benchmark on the 50-stop instance (means carry roughly ±1.5 km of seed noise;
+"best" is noisier than "mean"). Single-chain values unless noted:
+
+| change | random-50 best | random-50 mean | note |
+|---|---|---|---|
+| baseline SA | 261.70 | 263.22 | already beat OR-Tools on every seed |
+| + final descent polish | 258.68 | 261.60 | *guaranteed* never to worsen; all Metro seeds hit 145.33 |
+| + 6 parallel chains | — | 259.57 | best-of-N dominance; variance collapse |
+| + hot-loop speedup | 258.30 | (noise) | 86k → 127k it/s, **bit-identical** fixed-seed trajectories |
+| + candidate-list bias | 258.14 | 260.78 | inter-route moves target 10-NN with p = 0.8 |
+| + 2-opt* | **256.61** | 260.96 | prefix-preserving tail exchange |
+| + Clarke–Wright warm start | 258.30 | 260.40 | accepted on the mean; restored all-seeds-optimal Metro |
+| **final, ×6 chains** | 256.61 | **258.90** | every run beats OR-Tools by 1.9–3.2% |
 
 ### Notes from tuning (what the charts caught)
 
@@ -294,7 +324,7 @@ this project:
 ## Testing
 
 ```bash
-cd backend && .venv/Scripts/python -m pytest    # 47 tests
+cd backend && .venv/Scripts/python -m pytest    # 61 tests
 ```
 
 - **2-opt correctness** — exhaustive 2-opt descent from scrambled starts must reach the
