@@ -37,6 +37,14 @@ bouncing over the incumbent (blue), temperature descending on schedule.*
 
 ## Quick start
 
+One command (bootstraps the venv and node_modules on first run, then starts both services):
+
+```bash
+python run.py    # backend on :8000 (or next free port), UI on :5173 — Ctrl+C stops both
+```
+
+Or by hand:
+
 ```bash
 # backend (Python 3.11+)
 cd backend
