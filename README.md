@@ -70,6 +70,10 @@ If port 8000 is taken locally: `uvicorn app.main:app --port 8001` and
 
 ## Architecture
 
+> The full design doc — module boundaries, the streaming pipeline, the wire contract,
+> the parallel-chains process model, deployment — is
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ```mermaid
 flowchart LR
     subgraph Browser["React + TypeScript + Vite"]
