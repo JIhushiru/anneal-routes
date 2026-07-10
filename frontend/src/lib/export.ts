@@ -41,10 +41,11 @@ export function solutionToGeoJSON(problem: Problem, result: SolveResult): object
           type: "LineString",
           coordinates: [
             [problem.depot.lon, problem.depot.lat],
-            ...r.stop_ids.map((id) => {
-              const s = stopById.get(id)!;
-              return [s.lon, s.lat];
-            }),
+            // Defensive: skip ids missing from the problem snapshot rather than crash.
+            ...r.stop_ids
+              .map((id) => stopById.get(id))
+              .filter((s): s is NonNullable<typeof s> => s !== undefined)
+              .map((s) => [s.lon, s.lat]),
             [problem.depot.lon, problem.depot.lat],
           ],
         },
@@ -77,7 +78,8 @@ export function solutionToCSV(problem: Problem, result: SolveResult): string {
   ];
   for (const route of result.routes) {
     route.stop_ids.forEach((id, seq) => {
-      const s = stopById.get(id)!;
+      const s = stopById.get(id);
+      if (!s) return; // id missing from the problem snapshot: skip, don't crash
       const arrival = route.arrivals_min[seq];
       const late = s.tw_end !== null && arrival > s.tw_end ? (arrival - s.tw_end).toFixed(1) : "0";
       rows.push(

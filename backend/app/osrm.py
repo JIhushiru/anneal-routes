@@ -48,8 +48,11 @@ def fetch_osrm_matrices(
     key = _cache_key(coords)
     cache_file = CACHE_DIR / f"{key}.json"
     if cache_file.exists():
-        cached = json.loads(cache_file.read_text())
-        return cached["dist_km"], cached["time_min"]
+        try:
+            cached = json.loads(cache_file.read_text())
+            return cached["dist_km"], cached["time_min"]
+        except (json.JSONDecodeError, KeyError, TypeError, OSError):
+            cache_file.unlink(missing_ok=True)  # corrupted/truncated cache: refetch
 
     # OSRM wants lon,lat order.
     path = ";".join(f"{lon:.{COORD_PRECISION}f},{lat:.{COORD_PRECISION}f}" for lat, lon in coords)
@@ -60,18 +63,32 @@ def fetch_osrm_matrices(
         data = resp.json()
     except httpx.HTTPError as exc:
         raise OSRMError(f"OSRM request failed ({exc}); switch back to haversine distances") from exc
+    except ValueError as exc:  # 200 with a non-JSON body (proxy error page, etc.)
+        raise OSRMError("OSRM returned a malformed response; switch back to haversine distances") from exc
 
-    if data.get("code") != "Ok":
-        raise OSRMError(f"OSRM returned {data.get('code')}: {data.get('message', 'unknown error')}")
+    if not isinstance(data, dict) or data.get("code") != "Ok":
+        code = data.get("code") if isinstance(data, dict) else "malformed"
+        msg = data.get("message", "unknown error") if isinstance(data, dict) else ""
+        raise OSRMError(f"OSRM returned {code}: {msg}")
 
     # Unroutable pairs come back as null; substitute a large-but-finite distance so
     # the solvers steer around them instead of crashing.
     def _clean(matrix: list[list[float | None]], scale: float, fallback: float) -> list[list[float]]:
         return [[(v * scale if v is not None else fallback) for v in row] for row in matrix]
 
-    dist_km = _clean(data["distances"], 1 / 1000, fallback=10_000.0)
-    time_min = _clean(data["durations"], 1 / 60, fallback=100_000.0)
+    try:
+        raw_dist, raw_time = data["distances"], data["durations"]
+        unroutable = any(v is None for row in raw_dist for v in row) or any(
+            v is None for row in raw_time for v in row
+        )
+        dist_km = _clean(raw_dist, 1 / 1000, fallback=10_000.0)
+        time_min = _clean(raw_time, 1 / 60, fallback=100_000.0)
+    except (KeyError, TypeError) as exc:
+        raise OSRMError("OSRM response is missing its distance/duration matrices") from exc
 
-    CACHE_DIR.mkdir(exist_ok=True)
-    cache_file.write_text(json.dumps({"dist_km": dist_km, "time_min": time_min}))
+    # Don't bake sentinel values into the cache: an unroutable pair may become
+    # routable after an OSM data fix, and a poisoned cache would hide it forever.
+    if not unroutable:
+        CACHE_DIR.mkdir(exist_ok=True)
+        cache_file.write_text(json.dumps({"dist_km": dist_km, "time_min": time_min}))
     return dist_km, time_min

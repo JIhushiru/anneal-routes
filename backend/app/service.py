@@ -91,9 +91,9 @@ def run_solver_streaming(
 ) -> SolveResult:
     """Blocking solve with progress callbacks. Run this in a worker thread.
 
-    ``should_stop`` is polled between SA events, so a client cancel takes effect
-    within TICK_EVERY iterations. OR-Tools cannot be interrupted mid-search; its
-    runtime is bounded by ``params.time_limit_s`` instead.
+    ``should_stop`` is polled between SA events (cancel takes effect within
+    TICK_EVERY iterations) and at every OR-Tools solution event (cancel asks the
+    CP search to finish early with its best-so-far).
     """
     p = prepare_problem(problem)
     started = time.perf_counter()
@@ -122,19 +122,26 @@ def run_solver_streaming(
         # visits, including deliberate uphill moves — track the incumbent here so
         # the client's "best cost" line is monotone and the map shows the best
         # routes found so far, not whatever GLS is currently exploring.
-        best = {"cost": float("inf"), "distance": 0.0, "routes": None}
+        #
+        # The incumbent key is (stops dropped, evaluator cost), compared
+        # lexicographically: our evaluator prices only the stops a solution
+        # actually serves, so an early solution that drops a stop looks
+        # fictitiously cheap and would otherwise lock in as "best" forever.
+        best: dict = {"key": (float("inf"), float("inf")), "distance": 0.0, "routes": None}
 
         def on_solution(ev) -> None:
-            improved = ev.best_cost < best["cost"]
+            dropped = p.n - sum(len(r) for r in ev.routes)
+            key = (dropped, ev.best_cost)
+            improved = key < best["key"]
             if improved:
-                best["cost"] = ev.best_cost
+                best["key"] = key
                 best["distance"] = ev.best_distance_km
                 best["routes"] = ev.routes
             emit(
                 ProgressEvent(
                     iteration=ev.solution_index,
                     temperature=None,
-                    best_cost=best["cost"],
+                    best_cost=best["key"][1],
                     current_cost=ev.best_cost,
                     best_distance_km=best["distance"],
                     elapsed_ms=ev.elapsed_ms,
@@ -143,7 +150,12 @@ def run_solver_streaming(
                 )
             )
 
-        result = solve_ortools(p, time_limit_s=params.time_limit_s, on_solution=on_solution)
+        result = solve_ortools(
+            p,
+            time_limit_s=params.time_limit_s,
+            on_solution=on_solution,
+            should_stop=should_stop,
+        )
         return build_solve_result(
             params.algorithm,
             result.best,

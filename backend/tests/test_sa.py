@@ -34,7 +34,7 @@ def test_sa_never_worse_than_its_warm_start():
 
 
 def test_sa_solution_is_feasible_on_demo_scenarios():
-    for key in ("metro-manila", "laguna"):
+    for key in ("metro-manila", "laguna", "random-50"):
         p = build_routing_problem(SCENARIOS[key]["problem"])
         result = solve_sa(p, SAParams(iterations=60_000, seed=3), time_limit_s=30)
         assert is_feasible(result.best, p), f"{key}: SA returned an infeasible incumbent"

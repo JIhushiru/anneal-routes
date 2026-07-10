@@ -6,11 +6,13 @@ import { useStore } from "../state/store";
 
 export function ResultsPanel() {
   const run = useStore((s) => s.runs[s.viewRun]);
-  const buildProblem = useStore((s) => s.buildProblem);
-  const fleet = useStore((s) => s.fleet);
   const result = run.result;
+  // Export against the problem this run actually solved, not the live editor
+  // state — the user may have edited/deleted stops since the run finished.
+  const problem = run.problem;
 
-  if (!result) return null;
+  if (!result || !problem) return null;
+  const capacity = problem.fleet.capacity;
 
   return (
     <div className="panel results-panel">
@@ -73,7 +75,7 @@ export function ResultsPanel() {
                   {r.stop_ids.join(" → ")}
                 </td>
                 <td className={r.capacity_excess > 0 ? "warn" : ""}>
-                  {r.load}/{fleet.capacity}
+                  {r.load}/{capacity}
                 </td>
                 <td>{km(r.distance_km)}</td>
                 <td>{Math.round(r.duration_min)} min</td>
@@ -90,8 +92,8 @@ export function ResultsPanel() {
       </table>
 
       <div className="row">
-        <button onClick={() => exportGeoJSON(buildProblem(), result)}>Export GeoJSON</button>
-        <button onClick={() => exportCSV(buildProblem(), result)}>Export CSV</button>
+        <button onClick={() => exportGeoJSON(problem, result)}>Export GeoJSON</button>
+        <button onClick={() => exportCSV(problem, result)}>Export CSV</button>
       </div>
     </div>
   );

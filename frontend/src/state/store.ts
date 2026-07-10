@@ -25,6 +25,9 @@ export interface RunState {
   status: "idle" | "running" | "done" | "error";
   error: string | null;
   algorithm: Algorithm | null;
+  /** Snapshot of the problem this run solved — exports and route rendering use
+   * this, never the live editor state, which the user may have edited since. */
+  problem: Problem | null;
   samples: Sample[];
   liveRoutes: number[][];
   result: SolveResult | null;
@@ -34,6 +37,7 @@ const idleRun = (): RunState => ({
   status: "idle",
   error: null,
   algorithm: null,
+  problem: null,
   samples: [],
   liveRoutes: [],
   result: null,
@@ -99,7 +103,7 @@ export const useStore = create<AppStore>((set, get) => {
   function startRun(key: RunKey, algorithm: Algorithm, onDone: () => void): void {
     const problem = get().buildProblem();
     set((s) => ({
-      runs: { ...s.runs, [key]: { ...idleRun(), status: "running", algorithm } },
+      runs: { ...s.runs, [key]: { ...idleRun(), status: "running", algorithm, problem } },
       running: true,
       viewRun: key,
     }));
@@ -170,7 +174,11 @@ export const useStore = create<AppStore>((set, get) => {
     running: false,
     viewRun: "A",
 
+    // Problem edits are frozen while a solve runs: a mid-run edit would desync
+    // the drawn routes from their stops, and in comparison mode would hand run B
+    // a different problem than run A just solved.
     addStop(lat, lon) {
+      if (get().running) return;
       set((s) => ({
         stops: [
           ...s.stops,
@@ -182,9 +190,11 @@ export const useStore = create<AppStore>((set, get) => {
       }));
     },
     updateStop(id, patch) {
+      if (get().running) return;
       set((s) => ({ stops: s.stops.map((st) => (st.id === id ? { ...st, ...patch } : st)) }));
     },
     removeStop(id) {
+      if (get().running) return;
       set((s) => ({
         stops: s.stops.filter((st) => st.id !== id),
         selectedStopId: s.selectedStopId === id ? null : s.selectedStopId,
@@ -194,6 +204,7 @@ export const useStore = create<AppStore>((set, get) => {
       get().updateStop(id, { lat, lon });
     },
     setDepot(lat, lon) {
+      if (get().running) return;
       set({ depot: { lat, lon } });
     },
     selectStop(id) {
@@ -252,8 +263,16 @@ export const useStore = create<AppStore>((set, get) => {
     },
     cancel() {
       cancelled = true;
-      activeHandle?.cancel();
-      set({ running: false });
+      activeHandle?.cancel(); // terminal: the old stream will never call back again
+      activeHandle = null;
+      set((s) => ({
+        running: false,
+        // Keep whatever the cancelled run found so far, shown as finished.
+        runs: {
+          A: s.runs.A.status === "running" ? { ...s.runs.A, status: "done" } : s.runs.A,
+          B: s.runs.B.status === "running" ? { ...s.runs.B, status: "done" } : s.runs.B,
+        },
+      }));
     },
   };
 });

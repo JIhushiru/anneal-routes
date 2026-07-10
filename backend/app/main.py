@@ -101,17 +101,22 @@ async def ws_solve(ws: WebSocket) -> None:
     worker.start()
 
     async def watch_client() -> None:
-        """Set the stop flag on an explicit cancel message or a disconnect."""
-        try:
-            while True:
+        """Set the stop flag on an explicit cancel message or a disconnect.
+
+        Unparseable frames (bad JSON, binary) are IGNORED, not treated as a
+        cancel — a stray frame must not silently truncate a solve.
+        """
+        while True:
+            try:
                 msg = await ws.receive_json()
-                if isinstance(msg, dict) and msg.get("type") == "cancel":
-                    stop_flag.set()
-                    return
-        except WebSocketDisconnect:
-            stop_flag.set()
-        except Exception:
-            stop_flag.set()
+            except (WebSocketDisconnect, RuntimeError):
+                stop_flag.set()
+                return
+            except Exception:
+                continue
+            if isinstance(msg, dict) and msg.get("type") == "cancel":
+                stop_flag.set()
+                return
 
     watcher = asyncio.create_task(watch_client())
     try:

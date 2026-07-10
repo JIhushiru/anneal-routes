@@ -26,8 +26,10 @@ export interface StreamHandle {
 /**
  * Open a WebSocket solve. Events arrive already coalesced to ~30 fps by the
  * server. `onEvent` receives every progress frame plus the terminal done/error.
- * Returns a handle whose cancel() sends a cancel message (the server stops SA
- * within a few hundred iterations) and closes the socket.
+ *
+ * cancel() is terminal for the stream: it tells the server to stop, closes the
+ * socket, and guarantees `onEvent` is NEVER called again — so a cancelled run
+ * can't write stale events into state that a newer run now owns.
  */
 export function solveStream(
   problem: Problem,
@@ -40,6 +42,7 @@ export function solveStream(
 
   ws.onopen = () => ws.send(JSON.stringify({ type: "solve", problem, params }));
   ws.onmessage = (msg) => {
+    if (settled) return;
     const event: ServerEvent = JSON.parse(msg.data);
     if (event.type === "done" || event.type === "error") {
       settled = true;
@@ -62,7 +65,14 @@ export function solveStream(
 
   return {
     cancel() {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "cancel" }));
+      if (settled) return;
+      settled = true; // no further onEvent deliveries, whatever the server sends
+      try {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "cancel" }));
+      } catch {
+        // closing anyway
+      }
+      ws.close(); // also aborts a still-CONNECTING socket before the solve is sent
     },
   };
 }

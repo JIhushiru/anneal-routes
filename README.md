@@ -40,7 +40,8 @@ bouncing over the incumbent (blue), temperature descending on schedule.*
 ```bash
 # backend (Python 3.11+)
 cd backend
-python -m venv .venv && .venv/Scripts/activate   # Windows; use bin/activate on Unix
+python -m venv .venv
+source .venv/Scripts/activate    # Git Bash on Windows · source .venv/bin/activate on Unix
 pip install -r requirements.txt
 uvicorn app.main:app --port 8000
 
@@ -129,17 +130,22 @@ $$
 
 $$
 x_{ijk} = 1 \;\Rightarrow\; a_j \ge \max(a_i,\, e_i) + s_i + t_{ij}
+\qquad \forall\, i,\ \forall\, j \ne 0,\quad a_0 = 0
 \qquad\text{(time propagation, } t_{ij} = d_{ij}/v\text{)}
 $$
 
 $$
-e_j \le \max(a_j, e_j) \le \ell_j \quad \forall j \text{ with a window}
+e_j \le \max(a_j, e_j) \le \ell_j \quad \forall j \ne 0 \text{ with a window}
 \qquad\text{(service starts inside the window; early arrival waits)}
 $$
 
-The time-propagation implication also eliminates subtours: arrival times increase
-strictly along a route, so no cycle that avoids the depot can satisfy it — the classic
-MTZ-style trick, which is why no exponential family of subtour constraints is needed.
+Time propagation is quantified over arcs *into stops* only: $a_0$ is the fixed
+departure time, and arcs returning to the depot are unconstrained (route duration is
+not part of the objective, and the depot has no window). One arrival variable per stop
+suffices because each stop is entered exactly once. The implication also eliminates
+subtours: with $t_{ij} > 0$, arrival times increase strictly along every arc into a
+stop, so a cycle visiting only stops would force $a_j > a_j$ — the classic MTZ-style
+trick, which is why no exponential family of subtour constraints is needed.
 
 CVRPTW is NP-hard (it contains the TSP as the $m{=}1$, $Q{=}\infty$, no-windows special
 case), so past a few dozen stops exact methods give way to heuristics.
@@ -256,8 +262,9 @@ OR-Tools 9.x, 2026-07-11. Reproduce with
 
 Reading: SA ties OR-Tools exactly on both structured scenarios (all five Laguna seeds
 land on 176.29 km — very likely the optimum) and beats it on the 50-stop instance on
-*every* seed (worst seed 264.45 km < 265.17 km). Greedy is 23–37% worse everywhere,
-which is the honest measure of what the metaheuristics buy.
+*every* seed (worst seed 264.45 km < 265.17 km). Greedy is 32–58% worse than OR-Tools
+across the three instances (31.9% / 37.3% / 58.0%), which is the honest measure of what
+the metaheuristics buy.
 
 ### Notes from tuning (what the charts caught)
 
@@ -275,7 +282,7 @@ this project:
 ## Testing
 
 ```bash
-cd backend && .venv/Scripts/python -m pytest    # 45 tests
+cd backend && .venv/Scripts/python -m pytest    # 47 tests
 ```
 
 - **2-opt correctness** — exhaustive 2-opt descent from scrambled starts must reach the

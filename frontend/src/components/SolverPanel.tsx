@@ -120,7 +120,15 @@ export function SolverPanel() {
       <div className="row">
         <select
           value={s.algorithm}
-          onChange={(e) => s.patch({ algorithm: e.target.value as Algorithm })}
+          onChange={(e) => {
+            const algorithm = e.target.value as Algorithm;
+            // Keep the comparison partner distinct from the primary.
+            const algorithmB =
+              algorithm === s.algorithmB
+                ? ALGORITHMS.find((a) => a !== algorithm)!
+                : s.algorithmB;
+            s.patch({ algorithm, algorithmB });
+          }}
           disabled={s.running}
         >
           {ALGORITHMS.map((a) => (
@@ -167,9 +175,13 @@ export function SolverPanel() {
           <input
             type="number"
             min={1000}
+            max={5_000_000}
             step={10000}
             value={s.saIterations}
-            onChange={(e) => s.patch({ saIterations: Math.max(1000, Number(e.target.value)) })}
+            onChange={(e) =>
+              // Backend schema bounds: 1e3 <= iterations <= 5e6.
+              s.patch({ saIterations: clampInt(e.target.value, 1000, 5_000_000) })
+            }
             disabled={s.running}
           />
         </label>

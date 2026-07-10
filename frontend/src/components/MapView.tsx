@@ -123,6 +123,7 @@ export function MapView() {
 
     // Drag-to-move stops: grab on the circle layer, pan disabled while dragging.
     map.on("mousedown", "stops-circle", (e) => {
+      if (useStore.getState().running) return; // problem is frozen mid-solve
       e.preventDefault();
       const id = e.features?.[0]?.properties.id as number | undefined;
       if (id === undefined) return;
@@ -130,11 +131,17 @@ export function MapView() {
       const onMove = (ev: MapMouseEvent) => {
         useStore.getState().moveStop(id, ev.lngLat.lat, ev.lngLat.lng);
       };
-      map.on("mousemove", onMove);
-      map.once("mouseup", () => {
+      // End the drag on ANY mouseup — the map's own event never fires when the
+      // button is released outside the canvas, which would glue the stop to the
+      // cursor and leave panning disabled.
+      const end = () => {
         map.off("mousemove", onMove);
+        map.off("mouseup", end);
+        window.removeEventListener("mouseup", end);
         map.dragPan.enable();
-      });
+      };
+      map.on("mouseup", end);
+      window.addEventListener("mouseup", end);
     });
 
     // Keep the popover glued to its stop while panning/zooming.
@@ -230,7 +237,9 @@ export function MapView() {
     <div className="map-wrap" data-mode={editMode} data-view-run={viewRun}>
       <div ref={containerRef} className="map-container" />
       {selectedStop && anchor && (
-        <StopPopover stop={selectedStop} x={anchor.x} y={anchor.y} />
+        // key: switching stops must remount the popover so its local
+        // time-window text state can't be committed onto the wrong stop.
+        <StopPopover key={selectedStop.id} stop={selectedStop} x={anchor.x} y={anchor.y} />
       )}
     </div>
   );

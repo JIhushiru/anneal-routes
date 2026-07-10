@@ -57,7 +57,11 @@ def solve_ortools(
     p: RoutingProblem,
     time_limit_s: float = 10.0,
     on_solution: Optional[Callable[[ORToolsEvent], None]] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> ORToolsResult:
+    """``should_stop`` is polled at every solution event; when it turns true the
+    CP search is asked to finish early, returning the best solution found so far
+    (this is how a client cancel reaches an in-flight OR-Tools run)."""
     started = time.perf_counter()
 
     manager = pywrapcp.RoutingIndexManager(p.n + 1, p.vehicles, 0)
@@ -92,9 +96,13 @@ def solve_ortools(
         return transit_s[manager.IndexToNode(from_index)][manager.IndexToNode(to_index)]
 
     time_index = routing.RegisterTransitCallback(time_cb)
-    finite_ends = [w[1] for w in p.tw if w is not None and w[1] != float("inf")]
+    # The horizon must dominate every finite window BOUND — including the start of
+    # an open-ended "not before X" window, where the vehicle may have to sit and
+    # wait until X before doing any more driving. Deriving it from window ends
+    # alone made SetRange(start, horizon) invert for such stops -> "CP Solver fail".
+    finite_bounds = [b for w in p.tw if w is not None for b in w if b != float("inf")]
     horizon_s = round(
-        (max(finite_ends, default=0.0) + sum(sum(r) for r in p.time_min) + sum(p.service_min)) * SECONDS
+        (max(finite_bounds, default=0.0) + sum(sum(r) for r in p.time_min) + sum(p.service_min)) * SECONDS
     ) + 1
     routing.AddDimension(time_index, horizon_s, horizon_s, True, "Time")
     time_dim = routing.GetDimensionOrDie("Time")
@@ -129,6 +137,11 @@ def solve_ortools(
     def _at_solution() -> None:
         nonlocal solutions_seen
         solutions_seen += 1
+        if should_stop is not None and should_stop():
+            try:
+                routing.solver().FinishCurrentSearch()
+            except Exception:
+                pass  # cancellation is best-effort; the time limit still bounds the run
         if on_solution is None:
             return
         routes = _extract_bound_routes()
