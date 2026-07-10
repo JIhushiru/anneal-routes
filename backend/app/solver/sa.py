@@ -23,17 +23,25 @@ which concentrates on global minimizers as T -> 0.
 
 Cooling schedule
 ----------------
-Geometric cooling with a budget-derived ratio:
+Geometric cooling parameterized by *budget consumption*:
 
-    T_k = T_0 * alpha^k,   alpha = (T_f / T_0)^(1/K)
+    T(p) = T_0 * (T_f / T_0)^p,   p = max(k / K, elapsed / time_limit) in [0, 1]
 
-where K is the iteration budget. Geometric cooling is the standard practical
-choice: the theoretically-guaranteed logarithmic schedule (Hajek, 1988) needs
-astronomically many iterations, while a geometric schedule spends comparable
-search effort per temperature *decade*, which is where the qualitative behavior
-changes. Deriving alpha from (T_0, T_f, K) instead of hard-coding "alpha = 0.999"
-makes the trajectory scale-free: every run sweeps the same acceptance range
-regardless of budget or instance size.
+where k is the iteration count, K the iteration budget, and p the fraction of
+whichever budget (iterations or wall clock) is being consumed faster. When the
+run is iteration-bound this is exactly the classic geometric schedule
+T_k = T_0 * alpha^k with alpha = (T_f/T_0)^(1/K); when the time limit is the
+binding constraint, the schedule contracts so that the full cooling arc still
+completes — a run cut off mid-melt would otherwise return a half-random walk
+(measurably worse than greedy on the 50-stop scenario).
+
+Geometric cooling is the standard practical choice: the theoretically-guaranteed
+logarithmic schedule (Hajek, 1988) needs astronomically many iterations, while a
+geometric schedule spends comparable search effort per temperature *decade*,
+which is where the qualitative behavior changes. Deriving the ratio from
+(T_0, T_f, budget) instead of hard-coding "alpha = 0.999" makes the trajectory
+scale-free: every run sweeps the same acceptance range regardless of budget or
+instance size.
 
 Endpoint calibration (Ropke & Pisinger, 2006)
 ---------------------------------------------
@@ -147,15 +155,18 @@ def anneal(
     best_distance = sum(e.distance_km for e in evals)
 
     t0, tf = _calibrate_temperatures(current_cost, params)
-    alpha = (tf / t0) ** (1.0 / params.iterations)
+    log_ratio = math.log(tf / t0) if tf < t0 else 0.0
     temperature = t0
 
     yield SAEvent(0, temperature, best_cost, current_cost, best_distance, True, [r[:] for r in best])
 
     iteration = 0
+    elapsed_frac = 0.0  # refreshed every TICK_EVERY iterations
     for iteration in range(1, params.iterations + 1):
-        # Decay first so events at iteration k always report T_k = T_0 * alpha^k.
-        temperature *= alpha
+        # Cooling driven by whichever budget is being consumed faster, so the
+        # schedule reaches T_f exactly when the run ends (see module docstring).
+        progress = min(1.0, max(iteration / params.iterations, elapsed_frac))
+        temperature = t0 * math.exp(log_ratio * progress)
 
         move = propose_random_move(current, rng)
         if move is not None:
@@ -182,11 +193,12 @@ def anneal(
         if iteration % RESYNC_EVERY == 0:
             current_cost = sum(e.penalized_cost for e in evals)
         if iteration % TICK_EVERY == 0:
+            elapsed_frac = (time.perf_counter() - started) / time_limit_s
             yield SAEvent(
                 iteration, temperature, best_cost, current_cost,
                 best_distance, False, [r[:] for r in best],
             )
-            if time.perf_counter() - started > time_limit_s:
+            if elapsed_frac >= 1.0:
                 break
 
     yield SAEvent(

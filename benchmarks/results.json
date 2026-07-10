@@ -1,0 +1,65 @@
+{
+  "metro-manila": {
+    "name": "Metro Manila \u2014 25 stops",
+    "n": 25,
+    "vehicles": 4,
+    "nn": {
+      "dist_km": 191.66,
+      "ms": 0.1,
+      "feasible": true
+    },
+    "ortools": {
+      "dist_km": 145.33,
+      "ms": 10006
+    },
+    "sa": {
+      "best_km": 145.33,
+      "mean_km": 145.7,
+      "worst_km": 146.26,
+      "mean_ms": 10002,
+      "runs": 5
+    }
+  },
+  "laguna": {
+    "name": "Laguna \u2014 15 stops",
+    "n": 15,
+    "vehicles": 3,
+    "nn": {
+      "dist_km": 241.96,
+      "ms": 0.0,
+      "feasible": true
+    },
+    "ortools": {
+      "dist_km": 176.29,
+      "ms": 10001
+    },
+    "sa": {
+      "best_km": 176.29,
+      "mean_km": 176.29,
+      "worst_km": 176.29,
+      "mean_ms": 10003,
+      "runs": 5
+    }
+  },
+  "random-50": {
+    "name": "Random \u2014 50 stops",
+    "n": 50,
+    "vehicles": 6,
+    "nn": {
+      "dist_km": 418.93,
+      "ms": 0.2,
+      "feasible": false
+    },
+    "ortools": {
+      "dist_km": 265.17,
+      "ms": 10005
+    },
+    "sa": {
+      "best_km": 261.7,
+      "mean_km": 263.22,
+      "worst_km": 264.45,
+      "mean_ms": 10002,
+      "runs": 5
+    }
+  }
+}
