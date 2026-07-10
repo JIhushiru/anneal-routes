@@ -62,6 +62,7 @@ def build_solve_result(
             RouteResult(
                 vehicle=vehicle,
                 stop_ids=[p.stop_ids[n] for n in route],
+                arrivals_min=[round(a, 1) for a in ev.arrivals],
                 load=ev.load,
                 capacity_excess=ev.cap_excess,
                 distance_km=round(ev.distance_km, 3),
@@ -117,17 +118,28 @@ def run_solver_streaming(
         )
 
     if params.algorithm == Algorithm.OR_TOOLS:
+        # The at-solution callback fires for EVERY solution guided local search
+        # visits, including deliberate uphill moves — track the incumbent here so
+        # the client's "best cost" line is monotone and the map shows the best
+        # routes found so far, not whatever GLS is currently exploring.
+        best = {"cost": float("inf"), "distance": 0.0, "routes": None}
+
         def on_solution(ev) -> None:
+            improved = ev.best_cost < best["cost"]
+            if improved:
+                best["cost"] = ev.best_cost
+                best["distance"] = ev.best_distance_km
+                best["routes"] = ev.routes
             emit(
                 ProgressEvent(
                     iteration=ev.solution_index,
                     temperature=None,
-                    best_cost=ev.best_cost,
+                    best_cost=best["cost"],
                     current_cost=ev.best_cost,
-                    best_distance_km=ev.best_distance_km,
+                    best_distance_km=best["distance"],
                     elapsed_ms=ev.elapsed_ms,
-                    improved=True,
-                    routes=routes_to_stop_ids(ev.routes, p),
+                    improved=improved,
+                    routes=routes_to_stop_ids(best["routes"] or ev.routes, p),
                 )
             )
 

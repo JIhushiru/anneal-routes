@@ -35,21 +35,28 @@ changes. Deriving alpha from (T_0, T_f, K) instead of hard-coding "alpha = 0.999
 makes the trajectory scale-free: every run sweeps the same acceptance range
 regardless of budget or instance size.
 
-Endpoint calibration (Johnson, Aragon, McGeoch & Schevon, 1989)
----------------------------------------------------------------
+Endpoint calibration (Ropke & Pisinger, 2006)
+---------------------------------------------
 Fixed temperatures would be wrong by orders of magnitude across instances (a
-Laguna problem has km-scale deltas; with OSRM meters or heavy penalties they can
-be 1000x larger). Instead the endpoints are set from a target *acceptance ratio*:
-sample m = 256 random moves at the initial solution, take the mean uphill delta
-mean_up, and solve  exp(-mean_up / T) = chi  for T:
+Laguna problem has km-scale deltas; with OSRM meters they are 1000x larger), so
+the endpoints are tied to the *objective scale*: choose T so that a solution
+w% worse than the initial cost f(S_0) is accepted with probability 1/2,
 
-    T_0 = mean_up / ln(1 / chi_0),   chi_0 = 0.80  (start: accept 80% of uphill moves)
-    T_f = mean_up / ln(1 / chi_f),   chi_f = 1e-3  (end: effectively pure descent)
+    exp(-(w/100) f(S_0) / T) = 1/2   =>   T = (w/100) f(S_0) / ln 2
 
-chi_0 = 0.8 is high enough to melt the greedy warm start out of its local basin
-without wasting the budget on a pure random walk (chi_0 -> 1 degenerates to
-shuffling); chi_f = 1e-3 ends the run as a deterministic polish so the final
-incumbent sits at the bottom of its basin. Both are exposed in SAParams.
+with w_start = 5 (melt: 5%-worse solutions pass half the time) and
+w_end = 0.01 (freeze: even 0.01%-worse moves are usually refused — the schedule
+ends as pure descent over the 2-opt/or-opt/relocate/swap neighborhood).
+
+Why not the older recipe — set T from the mean uphill delta so that a target
+fraction of sampled moves is accepted (Johnson et al., 1989)? Because with soft
+constraints the sampled-move distribution is bimodal: most deltas are km-scale,
+but moves that cross a capacity/time-window boundary jump by LAMBDA_CAP or more.
+The mean is dominated by that penalty tail, which (measured on the Metro Manila
+scenario) inflates T_0 ~ 25x and — much worse — leaves T_f *above* the typical
+km-scale delta, so the "final descent" still accepted ~50% of ordinary uphill
+moves and the run never polished its incumbent. Anchoring to a fraction of
+f(S_0) is immune to the shape of the move distribution.
 
 Initial solution
 ----------------
@@ -68,7 +75,7 @@ from dataclasses import dataclass
 from typing import Iterator, Optional
 
 from ..schemas import SAParams
-from .evaluate import RouteEval, evaluate_route
+from .evaluate import evaluate_route
 from .model import RoutingProblem, Solution
 from .moves import propose_random_move
 from .nearest_neighbor import solve_nearest_neighbor
@@ -79,7 +86,6 @@ TICK_EVERY = 500
 # Recompute the accumulated cost exactly this often to cancel floating-point
 # drift from 10^5+ incremental "cost += delta" updates.
 RESYNC_EVERY = 10_000
-CALIBRATION_SAMPLES = 256
 
 
 @dataclass(frozen=True)
@@ -103,34 +109,17 @@ class SAResult:
     runtime_ms: float
 
 
-def _calibrate_temperatures(
-    solution: Solution,
-    evals: list[RouteEval],
-    p: RoutingProblem,
-    params: SAParams,
-    rng: random.Random,
-) -> tuple[float, float]:
-    """Sample uphill deltas at the initial solution and solve for (T_0, T_f).
+def _calibrate_temperatures(initial_cost: float, params: SAParams) -> tuple[float, float]:
+    """Solve  exp(-(w/100) f(S_0) / T) = 1/2  for the start and end temperatures.
 
-    Works on a scratch copy: calibration must not perturb the actual start state.
+    Anchoring to a fraction of the initial objective keeps the schedule immune to
+    penalty-sized outliers in the move-delta distribution (see module docstring).
+    ``max(cost, 1.0)`` guards the degenerate near-zero-cost instance.
     """
-    scratch = [r[:] for r in solution]
-    scratch_evals = evals[:]
-    uphill: list[float] = []
-    for _ in range(CALIBRATION_SAMPLES):
-        move = propose_random_move(scratch, rng)
-        if move is None:
-            continue
-        old = sum(scratch_evals[i].penalized_cost for i in move.route_indices)
-        new = sum(evaluate_route(r, p).penalized_cost for r in move.new_routes)
-        if new > old:
-            uphill.append(new - old)
-    # Degenerate case (e.g. a 1-stop instance where no move is ever uphill):
-    # any positive temperature works because nothing needs escaping.
-    mean_up = sum(uphill) / len(uphill) if uphill else 1.0
-    t0 = mean_up / math.log(1.0 / params.initial_acceptance)
-    tf = mean_up / math.log(1.0 / params.final_acceptance)
-    return t0, tf
+    scale = max(initial_cost, 1.0)
+    t0 = (params.start_accept_worse_pct / 100.0) * scale / math.log(2.0)
+    tf = (params.end_accept_worse_pct / 100.0) * scale / math.log(2.0)
+    return t0, min(tf, t0)  # a user setting end% > start% must not make alpha > 1
 
 
 def anneal(
@@ -157,7 +146,7 @@ def anneal(
     best_cost = current_cost
     best_distance = sum(e.distance_km for e in evals)
 
-    t0, tf = _calibrate_temperatures(current, evals, p, params, rng)
+    t0, tf = _calibrate_temperatures(current_cost, params)
     alpha = (tf / t0) ** (1.0 / params.iterations)
     temperature = t0
 

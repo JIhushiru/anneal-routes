@@ -77,11 +77,22 @@ class Problem(BaseModel):
 
 
 class SAParams(BaseModel):
-    """Tunables for the simulated-annealing solver. Defaults are justified in sa.py."""
+    """Tunables for the simulated-annealing solver. Defaults are justified in sa.py.
 
-    iterations: int = Field(default=200_000, ge=1_000, le=5_000_000)
-    initial_acceptance: float = Field(default=0.80, gt=0, lt=1)
-    final_acceptance: float = Field(default=1e-3, gt=0, lt=1)
+    Temperatures are parameterized as "accept a solution X% worse than the start
+    with probability 1/2" (Ropke & Pisinger, 2006) — scale-free and robust to
+    penalty-sized cost jumps in the move distribution.
+    """
+
+    iterations: int = Field(default=500_000, ge=1_000, le=5_000_000)
+    start_accept_worse_pct: float = Field(
+        default=5.0, gt=0, le=100,
+        description="T0: a move this % worse than the initial cost is accepted w.p. 0.5",
+    )
+    end_accept_worse_pct: float = Field(
+        default=0.01, gt=0, le=100,
+        description="Tf: same rule at the final iteration (effectively pure descent)",
+    )
     seed: Optional[int] = Field(default=None, description="RNG seed for reproducible runs")
 
 
@@ -101,6 +112,7 @@ class TWViolation(BaseModel):
 class RouteResult(BaseModel):
     vehicle: int
     stop_ids: list[int] = Field(description="Visit order, depot excluded")
+    arrivals_min: list[float] = Field(description="Service-start time per stop, aligned with stop_ids")
     load: float
     capacity_excess: float
     distance_km: float

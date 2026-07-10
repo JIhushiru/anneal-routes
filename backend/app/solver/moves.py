@@ -105,6 +105,12 @@ def propose_or_opt(solution: Solution, rng: random.Random) -> Move | None:
 
 
 def propose_relocate(solution: Solution, rng: random.Random) -> Move | None:
+    """Move a chain of 1-3 consecutive stops to another route (possibly empty).
+
+    Single-stop relocation is the classic move; letting the chain grow to 2-3
+    (biased toward 1) also transfers naturally-adjacent stops together, which is
+    what actually rebalances clustered instances.
+    """
     if len(solution) < 2:
         return None
     sources = [k for k, r in enumerate(solution) if r]
@@ -113,12 +119,14 @@ def propose_relocate(solution: Solution, rng: random.Random) -> Move | None:
     src = rng.choice(sources)
     dst = rng.choice([k for k in range(len(solution)) if k != src])
     src_route = solution[src]
-    pos = rng.randrange(len(src_route))
-    node = src_route[pos]
-    new_src = src_route[:pos] + src_route[pos + 1 :]
+    max_len = min(3, len(src_route))
+    length = 1 if max_len == 1 else rng.choice((1, 1, 2, min(3, max_len)))
+    start = rng.randrange(0, len(src_route) - length + 1)
+    chain = src_route[start : start + length]
+    new_src = src_route[:start] + src_route[start + length :]
     dst_route = solution[dst]
     insert_at = rng.randrange(0, len(dst_route) + 1)
-    new_dst = dst_route[:insert_at] + [node] + dst_route[insert_at:]
+    new_dst = dst_route[:insert_at] + chain + dst_route[insert_at:]
     return Move("relocate", (src, dst), (new_src, new_dst))
 
 
