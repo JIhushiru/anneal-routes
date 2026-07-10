@@ -106,6 +106,10 @@ objective is never trusted, its routes are re-evaluated.
 
 ## The Mathematics
 
+> A deeper treatment — derivations, the detailed-balance argument, the uncrossing
+> lemma behind the test oracles, and the two calibration failure stories — lives in
+> [docs/MATHEMATICS.md](docs/MATHEMATICS.md).
+
 ### Problem: CVRPTW
 
 Given depot $0$ and stops $\{1,\dots,n\}$ with demands $q_i \ge 0$, service times $s_i$,
