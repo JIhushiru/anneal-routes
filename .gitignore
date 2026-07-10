@@ -1,0 +1,29 @@
+# Claude Code project pin-list (internal conversational state)
+CLAUDE.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+*.local
+
+# OSRM response cache
+backend/.osrm_cache/
+
+# Benchmark scratch output (final numbers live in README)
+benchmarks/raw/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
