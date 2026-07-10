@@ -41,10 +41,15 @@ def main() -> None:
     ap.add_argument("--time-limit", type=float, default=10.0)
     ap.add_argument("--sa-runs", type=int, default=5)
     ap.add_argument("--json-out", type=Path, default=None)
+    ap.add_argument(
+        "--only", action="append", choices=list(SCENARIOS), default=None,
+        help="run a subset of scenarios (repeatable) — for quick ablation gates",
+    )
     args = ap.parse_args()
 
+    selected = {k: v for k, v in SCENARIOS.items() if args.only is None or k in args.only}
     results: dict[str, dict] = {}
-    for key, sc in SCENARIOS.items():
+    for key, sc in selected.items():
         p = build_routing_problem(sc["problem"])
         print(f"\n=== {sc['name']} (n={p.n}, vehicles={p.vehicles}) ===", flush=True)
 

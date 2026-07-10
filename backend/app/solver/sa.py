@@ -72,6 +72,14 @@ Nearest-neighbor (see nearest_neighbor.py). Annealing from a greedy tour rather
 than a random permutation lets the whole budget refine plausible solutions; the
 high initial acceptance ratio still provides enough melt to leave the greedy
 basin, so the warm start costs nothing in exploration.
+
+Final polish
+------------
+SA terminates stochastically: the incumbent is near the bottom of its basin, not
+provably at it. The last POLISH_RESERVE fraction of the time budget is handed to
+a deterministic first-improvement descent (local_search.py) over the same
+neighborhood, which by construction never worsens the incumbent — the one
+improvement in this file that is guaranteed, not just expected.
 """
 
 from __future__ import annotations
@@ -84,6 +92,7 @@ from typing import Iterator, Optional
 
 from ..schemas import SAParams
 from .evaluate import evaluate_route
+from .local_search import descend
 from .model import RoutingProblem, Solution
 from .moves import propose_random_move
 from .nearest_neighbor import solve_nearest_neighbor
@@ -94,6 +103,8 @@ TICK_EVERY = 500
 # Recompute the accumulated cost exactly this often to cancel floating-point
 # drift from 10^5+ incremental "cost += delta" updates.
 RESYNC_EVERY = 10_000
+# Fraction of the time budget reserved for the deterministic final descent.
+POLISH_RESERVE = 0.05
 
 
 @dataclass(frozen=True)
@@ -162,6 +173,8 @@ def anneal(
 
     iteration = 0
     elapsed_frac = 0.0  # refreshed every TICK_EVERY iterations
+    # The anneal must finish its cooling arc before the polish reserve begins.
+    anneal_limit_s = time_limit_s * (1.0 - POLISH_RESERVE)
     for iteration in range(1, params.iterations + 1):
         # Cooling driven by whichever budget is being consumed faster, so the
         # schedule reaches T_f exactly when the run ends (see module docstring).
@@ -193,13 +206,26 @@ def anneal(
         if iteration % RESYNC_EVERY == 0:
             current_cost = sum(e.penalized_cost for e in evals)
         if iteration % TICK_EVERY == 0:
-            elapsed_frac = (time.perf_counter() - started) / time_limit_s
+            elapsed_frac = (time.perf_counter() - started) / anneal_limit_s
             yield SAEvent(
                 iteration, temperature, best_cost, current_cost,
                 best_distance, False, [r[:] for r in best],
             )
             if elapsed_frac >= 1.0:
                 break
+
+    # Deterministic polish on whatever time remains (never worsens the incumbent).
+    polished = descend(best, p, deadline=started + time_limit_s)
+    polished_evals = [evaluate_route(r, p) for r in polished]
+    polished_cost = sum(e.penalized_cost for e in polished_evals)
+    if polished_cost < best_cost - 1e-9:
+        best = polished
+        best_cost = polished_cost
+        best_distance = sum(e.distance_km for e in polished_evals)
+        yield SAEvent(
+            iteration, temperature, best_cost, best_cost,
+            best_distance, True, [r[:] for r in best],
+        )
 
     yield SAEvent(
         iteration, temperature, best_cost, current_cost,
