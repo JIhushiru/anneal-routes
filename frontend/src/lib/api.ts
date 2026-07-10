@@ -67,12 +67,21 @@ export function solveStream(
     cancel() {
       if (settled) return;
       settled = true; // no further onEvent deliveries, whatever the server sends
-      try {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "cancel" }));
-      } catch {
-        // closing anyway
+      if (ws.readyState !== WebSocket.OPEN) {
+        ws.close(); // aborts a still-CONNECTING socket before the solve is sent
+        return;
       }
-      ws.close(); // also aborts a still-CONNECTING socket before the solve is sent
+      try {
+        ws.send(JSON.stringify({ type: "cancel" }));
+      } catch {
+        // fall through to the close below
+      }
+      // Let the server finish its close handshake (it stops the solver, sends
+      // the final frame, then closes). Slamming the socket shut while it is
+      // still writing surfaces as ECONNRESET noise in the dev proxy. The
+      // timeout force-closes only if the server never gets there.
+      const fallback = window.setTimeout(() => ws.close(), 2000);
+      ws.addEventListener("close", () => window.clearTimeout(fallback));
     },
   };
 }

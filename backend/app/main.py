@@ -19,6 +19,7 @@ import threading
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
+from starlette.websockets import WebSocketState
 
 from .osrm import OSRMError
 from .scenarios import SCENARIOS
@@ -140,7 +141,11 @@ async def ws_solve(ws: WebSocket) -> None:
         stop_flag.set()
     finally:
         watcher.cancel()
-        try:
-            await ws.close()
-        except Exception:
-            pass
+        # Close only if we haven't already and the client is still there —
+        # double-closing a socket the client tore down shows up as an abrupt
+        # reset instead of a clean handshake.
+        if ws.application_state == WebSocketState.CONNECTED:
+            try:
+                await ws.close()
+            except Exception:
+                pass
