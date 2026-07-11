@@ -1,4 +1,4 @@
-# OptiRoute PH
+# anneal-routes
 
 **Watch a real optimization solver converge, live, on a map of the Philippines.**
 
