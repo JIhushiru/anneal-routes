@@ -1,4 +1,4 @@
-# anneal-routes
+# Anneal Routes
 
 **Watch a real optimization solver converge, live, on a map of the Philippines.**
 
